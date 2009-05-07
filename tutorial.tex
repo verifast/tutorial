@@ -1,0 +1,1157 @@
+\documentclass{article}
+
+\usepackage[pdftex]{hyperref}
+\usepackage{graphicx}
+\usepackage{listings}
+
+\addtolength{\hoffset}{-2cm}
+\addtolength{\textwidth}{4cm}
+\addtolength{\voffset}{-2cm}
+\addtolength{\textheight}{3cm}
+
+\lstset{language=c,columns=fullflexible,identifierstyle=\itshape} %,literate={&*&}{{$\mathrm{{\&}{*}{\&}}$}}1}
+
+\newtheorem{exercise}{Exercise}
+
+\title{The VeriFast Program Verifier: A Tutorial\\
+---Under Construction---}
+
+\author{Bart Jacobs \and Jan Smans \and Frank Piessens}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+VeriFast is a program verification tool for verifying certain
+correctness properties of single-threaded and multithreaded C
+programs. The tool reads a C program consisting of one or more
+.c source code files (plus any .h header files referenced from
+these .c files) and reports either ``0 errors found'' or
+indicates the location of a potential error. If the tool
+reports ``0 errors found'', this means\footnote{There are a few
+known reasons (known as \emph{unsoundnesses}) why the tool may
+sometimes incorrectly report ``0 errors found''; see the
+``Known unsoundnesses'' section in the Reference Manual. There
+may also be unknown unsoundnesses.} that the program
+\begin{itemize}
+\item does not perform illegal memory accesses, such as
+    reading or writing a struct instance field after the
+    struct instance has been freed, and
+\item does not include a certain type of concurrency errors
+    known as \emph{data races}, i.e. unsynchronized
+    conflicting accesses of the same field by multiple
+    threads. Accesses are considered conflicting if at
+    least one of them is a write access. And
+\item complies with function preconditions and
+    postconditions specified by the programmer in the form
+    of special comments (known as \emph{annotations}) in
+    the source code.
+\end{itemize}
+
+We will now proceed to show an example of each of these types
+of errors and how the tool reports them. To try the examples
+and exercises in this tutorial yourself, please download the
+release from the VeriFast website at
+\begin{center}
+\texttt{http://www.cs.kuleuven.be/\symbol{126}bartj/verifast/}
+\end{center}
+. You will find a command-line version of the tool
+(\texttt{verifast.exe}), and a version that presents a
+graphical user interface (\texttt{vfide.exe}). The example C
+programs used in this tutorial are in the \texttt{tutorial}
+directory.
+
+\section{Example: illegal\_access.c}
+
+Please start \texttt{vfide.exe} with the
+\texttt{illegal\_access.c} program. The program will be shown
+in the VeriFast IDE. To verify the program, choose the
+\textbf{Verify program} command in the \textbf{Verify} menu,
+press the \textbf{Play} toolbar button, or press F5. You will
+see something like this:
+\begin{center}
+\includegraphics[width=7cm]{illegal_access.png}
+\end{center}
+The program attempts to access a field of a struct instance
+allocated using $\mathit{malloc}$. However, if there is
+insufficient memory, $\mathit{malloc}$ returns zero and no
+memory is allocated. VeriFast detects the illegal memory access
+that happens in this case. Notice the following GUI elements:
+\begin{itemize}
+\item The erroneous program element is displayed in a red
+    color with a double underline.
+\item The error message states: ``No matching heap chunks:
+    account\_balance''. Indeed, in the scenario where there
+    is insufficient memory, the memory location (or
+    \emph{heap chunk}) that the program attempts to access
+    is not accessible to the program.
+    $\mathsf{account\_balance}$ is the type of heap chunk
+    that represents the $\mathsf{balance}$ field of an
+    $\mathsf{account}$ struct instance.
+\item The assignment statement is shown on a yellow
+    background. This is because the assignment statement is
+    the \emph{current step}. VeriFast verifies each
+    function by stepping through it, while keeping track of
+    a symbolic representation of the relevant program
+    state. You can inspect the symbolic state at each step
+    by selecting the step in the Steps pane in the lower
+    left corner of the VeriFast window. The program element
+    corresponding to the current step is shown on a yellow
+    background. The symbolic state consists of the
+    \emph{path condition}, shown in the Assumptions pane;
+    the \emph{symbolic heap}, shown in the Heap chunks
+    pane; and the \emph{symbolic store}, shown in the
+    Locals pane.
+\end{itemize}
+
+To correct the error, uncomment the commented statement. Now
+press F5 again. The program now verifies and no symbolic
+execution path is shown in the Steps pane.
+
+To inspect the symbolic execution of the $\mathsf{main}$
+function anyway, place the cursor on the last line (i.e., on
+the brace that closes the function body) and choose the
+\textbf{Run to cursor} command from the \textbf{Verify} menu,
+press the \textbf{Run to cursor} toolbar button, or press
+Ctrl+F5.
+\begin{center}
+\includegraphics[width=7cm]{illegal_access2.png}
+\end{center}
+Running to the cursor means showing an execution path that
+reaches the cursor. In general, there may be multiple such
+paths; in that case, the first such path is chosen (in the
+order on paths induced by the order on branches induced by the
+program text). In the example, there is only one path.
+
+To understand how VeriFast tracks the state of memory, select
+the fifth step in the Steps pane, as in the figure. The
+$\mathit{free}$ statement is the next statement to be executed.
+In this step, the symbolic heap contains two heap chunks:
+$\mathsf{account\_balance}(\mathsf{myAccount}, 5)$ and
+$\mathsf{malloc\_block\_account}(\mathsf{myAccount})$. The
+first heap chunk denotes the fact that the $\mathsf{balance}$
+field of the $\mathsf{account}$ struct instance at address
+$\mathsf{myAccount}$ is accessible to the program, and has
+value 5. The second heap chunk denotes the fact that the
+program has permission to de-allocate the memory block at
+address $\mathsf{myAccount}$. If you select the next step, you
+notice that the $\mathit{free}$ statement removes both heap
+chunks from the symbolic heap. Indeed, de-allocating the struct
+instance removes both the permission to access the struct
+instance's field, and the permission to free the struct
+instance. This prevents illegal memory accesses and double free
+errors.
+
+\section{Functions and Contracts}
+
+We continue to play with the example of the previous section.
+The example currently consists of only one function: the main
+function. Let's add another function. Write a function
+$\mathsf{account\_set\_balance}$ that takes the address of an
+$\mathsf{account}$ struct instance and a integer amount, and
+assigns this amount to the struct instance's $\mathsf{balance}$
+field. Then replace the field assignment in the main function
+with a call to this function. We now have the following
+program:
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct account {
+    int balance;
+};
+
+void account_set_balance(struct account *myAccount, int newBalance)
+{
+    myAccount->balance = newBalance;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account *myAccount = malloc(sizeof(struct account));
+    if (myAccount == 0) { abort(); }
+    account_set_balance(myAccount, 5);
+    free(myAccount);
+    return 0;
+}
+\end{lstlisting}
+
+If we try to verify the new program, VeriFast complains that
+the new function has no contract. Indeed, VeriFast verifies
+each function separately, so it needs a precondition and a
+postcondition for each function to describe the initial and
+final state of calls of the function.
+
+Add the same contract that the main function has:
+\begin{lstlisting}
+void account_set_balance(struct account *myAccount, int newBalance)
+    //@ requires true;
+    //@ ensures true;
+\end{lstlisting}
+Notice that contracts, like all VeriFast annotations, are in
+comments, so that the C compiler ignores them. VeriFast also
+ignores comments, except the ones that are marked with an at
+(\verb|@|) sign.
+
+VeriFast now no longer complains about missing contracts.
+However, it now complains that the field assignment in the body
+of $\mathsf{account\_set\_balance}$ cannot be verified because
+the symbolic heap does not contain a heap chunk that grants
+permission to access this field. To fix this, we need to
+specify in the function's precondition that the function
+requires permission to access the $\mathsf{balance}$ field of
+the $\mathsf{account}$ struct instance at address
+$\mathsf{myAccount}$. We achieve this simply by mentioning the
+heap chunk in the precondition:
+\begin{lstlisting}
+void account_set_balance(struct account *myAccount, int newBalance)
+    //@ requires account_balance(myAccount, _);
+    //@ ensures true;
+\end{lstlisting}
+Notice that we use an underscore in the position where the
+value of the field belongs. This indicates that we do not care
+about the old value of the field when the function is
+called.\footnote{VeriFast also supports a more concise syntax
+for field chunks. For example,
+\lstinline!account_balance(myAccount, _)! can also be written as
+\lstinline!myAccount->balance |-> _!.}
+
+VeriFast now highlights the brace that closes the body of the
+function. This means we successfully verified the field
+assignment. However, VeriFast now complains that the function
+leaks heap chunks. For now, let's simply work around this error
+message by inserting a $\mathbf{leak}$ command, which indicates
+that we're happy to leak this heap chunk. We will come back to
+this later.
+\begin{lstlisting}
+void account_set_balance(struct account *myAccount, int newBalance)
+    //@ requires account_balance(myAccount, _);
+    //@ ensures true;
+{
+    myAccount->balance = newBalance;
+    //@ leak account_balance(myAccount, _);
+}
+\end{lstlisting}
+
+Function $\mathsf{account\_set\_balance}$ now verifies, and
+VeriFast attempts to verify function $\mathsf{main}$. It
+complains that it cannot free the $\mathsf{account}$ struct
+instance because it does not have permission to access the
+$\mathsf{balance}$ field. Indeed, the symbolic heap contains
+the $\mathsf{malloc\_block\_account}$ chunk but not the
+$\mathsf{account\_balance}$ chunk. What happened to it? Let's
+find out by stepping through the symbolic execution path.
+Select the third step. The $\mathsf{malloc}$ statement is about
+to be executed and the symbolic heap is empty. Select the next
+step. The $\mathsf{malloc}$ statement has added the
+$\mathsf{account\_balance}$ chunk and the
+$\mathsf{malloc\_block\_account}$ chunk. The if statement has
+no effect.
+
+We then arrive at the call of $\mathsf{account\_set\_balance}$.
+You will notice that this execution step has two sub-steps,
+labeled ``Consuming assertion'' and ``Producing assertion''.
+The verification of a function call consists of
+\emph{consuming} the function's precondition and then
+\emph{producing} the function's postcondition. The precondition
+and the postcondition are \emph{assertions}, i.e., expressions
+that may include heap chunks in addition to ordinary logic.
+Consuming the precondition means passing the heap chunks
+required by the function to the function, thus removing them
+from the symbolic heap. Producing the postcondition means
+receiving the heap chunks offered by the function when it
+returns, thus adding them to the symbolic heap.
+
+Selecting the ``Consuming assertion'' step changes the layout
+of the VeriFast window.
+\begin{center}
+\includegraphics[width=7cm]{illegal_access3.png}
+\end{center}
+The source code pane is split into two
+parts. The upper part is used to display the contract of the
+function being called, while the lower part is used to display
+the function being verified. (Since in this example the
+function being called is so close to the function being
+verified, it is likely to be shown in the lower part as well.)
+The call being verified is shown on a green background. The
+part of the contract being consumed or produced is shown on a
+yellow background. If you move from the ``Consuming assertion''
+step to the ``Producing assertion'' step, you notice that the
+``Consuming assertion'' step removes the
+$\mathsf{account\_balance}$ chunk from the symbolic heap.
+Conceptually, it is now in use by the
+$\mathsf{account\_set\_balance}$ function while the
+$\mathsf{main}$ function waits for this function to return.
+Since function $\mathsf{account\_set\_balance}$'s postcondition
+does not mention any heap chunks, the ``Producing assertion''
+step does not add anything to the symbolic heap.
+
+It is now clear why VeriFast complained that
+$\mathsf{account\_set\_balance}$ leaked heap chunks: since the
+function did not return the $\mathsf{account\_balance}$ chunk
+to its caller, the chunk was lost and the field could never be
+accessed again. VeriFast considers this an error since it is
+usually not the intention of the programmer; furthermore, if
+too many memory locations are leaked, the program will run out
+of memory.
+
+It is now also clear how to fix the error: we must specify in
+the postcondition of function $\mathsf{account\_set\_balance}$
+that the function must hand back the
+$\mathsf{account\_balance}$ chunk to its caller.
+\begin{lstlisting}
+void account_set_balance(struct account *myAccount, int newBalance)
+    //@ requires account_balance(myAccount, _);
+    //@ ensures account_balance(myAccount, newBalance);
+{
+    myAccount->balance = newBalance;
+}
+\end{lstlisting}
+ This
+eliminates the leak error message and the error at the
+$\mathit{free}$ statement. The program now verifies. Notice
+that we refer to the $\mathsf{newBalance}$ parameter in the
+position where the value of the field belongs; this means that
+the value of the field when the function returns must be equal
+to the value of the parameter.
+
+\begin{exercise}\label{exercise:account1}
+Now factor out the creation and the disposal of the
+$\mathsf{account}$ struct instance into separate functions as
+well. The creation function should initialize the balance to
+zero. Note: if you need to mention multiple heap chunks in an
+assertion, separate them using the \emph{separate conjunction}
+\lstinline!&*&! (ampersand-star-ampersand). Also, you can refer
+to a function's return value in its postcondition by the name
+\lstinline!result!.
+\end{exercise}
+
+\section{Patterns}
+
+Now, let's add a function that returns the current balance, and
+let's test it in the main function. Here's our first attempt:
+
+\begin{lstlisting}
+int account_get_balance(struct account *myAccount)
+    //@ requires account_balance(myAccount, _);
+    //@ ensures account_balance(myAccount, _);
+{
+    return myAccount->balance;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account *myAccount = create_account();
+    account_set_balance(myAccount, 5);
+    int b = account_get_balance(myAccount);
+    assert(b == 5);
+    account_dispose(myAccount);
+    return 0;
+}
+\end{lstlisting}
+
+The new function verifies successfully, but VeriFast complains
+that it cannot prove the condition \lstinline!b == 5!. When
+VeriFast is asked to check a condition, it first translates the
+condition to a logical formula, by replacing each variable by
+its symbolic value. We can see in the symbolic store, displayed
+in the Locals pane, that the symbolic value of variable
+$\mathsf{b}$ is the logical symbol $\mathsf{b}$. Therefore, the
+resulting logical formula is \lstinline!b == 5!. VeriFast then
+attempts to derive this formula from the \emph{path condition},
+i.e., the formulae shown in the Assumptions pane. Since the
+only assumption in this case is \lstinline!true!, VeriFast
+cannot prove the condition.
+
+The problem is that the postcondition of function
+$\mathsf{account\_get\_balance}$ does not specify the
+function's return value. It does not state that the return
+value is equal to the value of the $\mathsf{balance}$ field
+when the function is called. To fix this, we need to be able to
+assign a name to the value of the balance field when the
+function is called. We can do so by replacing the underscore in
+the precondition by the \emph{pattern} \lstinline!?theBalance!.
+This causes the name \lstinline!theBalance! to be bound to the
+value of the $\mathsf{balance}$ field. We can then use this
+name in the postcondition to specify the return value using an
+equality condition. A function's return value is available in
+the function's postcondition under the name \lstinline!result!.
+Logical conditions and heap chunks in an assertion must be
+separated using the separating conjunction \lstinline!&*&!.
+\begin{lstlisting}
+int account_get_balance(struct account *myAccount)
+    //@ requires account_balance(myAccount, ?theBalance);
+    //@ ensures account_balance(myAccount, theBalance) &*& result == theBalance;
+{
+    return myAccount->balance;
+}
+\end{lstlisting}
+Notice that we use the \lstinline!theBalance! name also to
+specify that the function does not modify the value of the
+$\mathsf{balance}$ field, by using the name again in the field
+value position in the postcondition.
+
+The program now verifies. Indeed, if we use the \textbf{Run to
+cursor} command to run to the $\mathit{assert}$ statement, we
+see that the assumption \lstinline!(= b 5)! has appeared in the
+Assumptions pane. If we step up, we see that it was added when
+the equality condition in function
+$\mathsf{account\_get\_balance}$'s postcondition was produced.
+If we step up further, we see that the variable
+\lstinline!theBalance! was added to the upper Locals pane when
+the field chunk assertion was consumed, and bound to value 5.
+It was bound to value 5 because that was the value found in the
+symbolic heap. When verifying a function call, the upper Locals
+pane is used to evaluate the contract of the function being
+called. It initially contains the bindings of the function's
+parameters to the arguments specified in the call; additional
+bindings appear as patterns are encountered in the contract.
+The assumption \lstinline!(= b 5)! is the logical formula
+obtained by evaluating the equality condition %
+\lstinline!result == theBalance! under the symbolic store shown
+in the upper Locals pane.
+
+\begin{exercise}\label{exercise:account2}
+Add a function that deposits a given amount into an account.
+Verify the following \lstinline!main! function.
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account *myAccount = create_account();
+    account_set_balance(myAccount, 5);
+    account_deposit(myAccount, 10);
+    int b = account_get_balance(myAccount);
+    assert(b == 15);
+    account_dispose(myAccount);
+    return 0;
+}
+\end{lstlisting}
+Note: VeriFast checks for arithmetic overflow. For now, disable
+this check in the \textbf{Verify} menu.
+\end{exercise}
+
+\begin{exercise}\label{exercise:account3}
+Add a field \lstinline!limit! to struct \lstinline!account!.
+The limit is specified at creation time. Further add a function
+to withdraw a given amount from an account. The function must
+not withdraw more than allowed by the limit. The function
+returns the amount actually withdrawn as its return value. You
+will need to use C's conditional expressions
+\lstinline!condition ? value1 : value2!. Remove function
+\lstinline!account_set_balance!. Use the shorthand notation for
+field chunks: \lstinline!myAccount->balance |-> value!. Verify
+the following \lstinline!main! function.
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account *myAccount = create_account(-100);
+    account_deposit(myAccount, 200);
+    int w1 = account_withdraw(myAccount, 50);
+    assert(w1 == 50);
+    int b1 = account_get_balance(myAccount);
+    assert(b1 == 150);
+    int w2 = account_withdraw(myAccount, 300);
+    assert(w2 == 250);
+    int b2 = account_get_balance(myAccount);
+    assert(b2 == -100);
+    account_dispose(myAccount);
+    return 0;
+}
+\end{lstlisting}
+\end{exercise}
+
+\section{Predicates}
+
+We continue with the program obtained in
+Exercise~\ref{exercise:account3}. We observe that the contracts
+are becoming rather long. Furthermore, if we consider the
+account ``class'' and the main function to be in different
+modules, then the internal implementation details of the
+account module are exposed to the main function. We can achieve
+more concise contracts as well as information hiding by
+introducing a \emph{predicate} to describe an
+$\mathsf{account}$ struct instance in the function contracts.
+\begin{lstlisting}
+/*@
+predicate account_pred(struct account *myAccount, int theLimit, int theBalance) =
+    myAccount->limit |-> theLimit &*& myAccount->balance |-> theBalance
+    &*& malloc_block_account(myAccount);
+@*/
+\end{lstlisting}
+A predicate is a named, parameterized assertion. Furthermore, it introduces a new type of heap chunk.
+An \lstinline!account_pred! heap chunk bundles an \lstinline!account_limit! heap chunk, an \lstinline!account_balance! heap chunk,
+and a \lstinline!malloc_block_account! heap chunk into one.
+
+Let's use this predicate to rewrite the contract of the deposit function. Here's a first attempt:
+\begin{lstlisting}
+void account_deposit(struct account *myAccount, int amount)
+    //@ requires account_pred(myAccount, ?limit, ?balance) &*& 0 <= amount;
+    //@ ensures account_pred(myAccount, limit, balance + amount);
+{
+    myAccount->balance += amount;
+}
+\end{lstlisting}
+This function does not verify. The update of the
+\lstinline!balance! field cannot be verified since there is no
+\lstinline!account_balance! heap chunk in the symbolic heap.
+There is only a \lstinline!account_pred! heap chunk. The
+\lstinline!account_pred! heap chunk encapsulates the
+\lstinline!account_balance! heap chunk, but VeriFast does not
+``un-bundle'' the \lstinline!account_pred! predicate
+automatically. We must instruct VeriFast to un-bundle predicate
+heap chunks by inserting an \lstinline!open! ghost statement:
+\begin{lstlisting}
+void account_deposit(struct account *myAccount, int amount)
+    //@ requires account_pred(myAccount, ?limit, ?balance) &*& 0 <= amount;
+    //@ ensures account_pred(myAccount, limit, balance + amount);
+{
+    //@ open account_pred(myAccount, limit, balance);
+    myAccount->balance += amount;
+}
+\end{lstlisting}
+The assignment now verifies, but now VeriFast is stuck at the
+postcondition. It complains that it cannot find the
+\lstinline!account_pred! heap chunk that it is supposed to hand
+back to the function's caller. The \lstinline!account_pred!
+chunk's constituent chunks are present in the symbolic heap,
+but VeriFast does not automatically bundle them up into an
+\lstinline!account_pred! chunk. We must instruct VeriFast to do
+so using a \lstinline!close! ghost statement:
+\begin{lstlisting}
+void account_deposit(struct account *myAccount, int amount)
+    //@ requires account_pred(myAccount, ?limit, ?balance) &*& 0 <= amount;
+    //@ ensures account_pred(myAccount, limit, balance + amount);
+{
+    //@ open account_pred(myAccount, limit, balance);
+    myAccount->balance += amount;
+    //@ close account_pred(myAccount, limit, balance + amount);
+}
+\end{lstlisting}
+The function now verifies. However, the main function does not,
+since the call of \lstinline!account_deposit! expects an
+\lstinline!account_pred! heap chunk.
+
+\begin{exercise}\label{exercise:predicates}
+Rewrite the remaining contracts using the
+\lstinline!account_pred! predicate. Insert \lstinline!open! and
+\lstinline!close! statements as necessary.
+\end{exercise}
+
+\section{Recursive Predicates}
+
+In the previous section, we introduced predicates for the sake
+of conciseness and information hiding. However, there is an
+even more compelling need for predicates: they are the only way
+you can describe unbounded-size data structures in VeriFast.
+Indeed, in the absence of predicates, the number of memory
+locations described by an assertion is linear in the length of
+the assertion. This limitation can be overcome through the use
+of recursive predicates, i.e., predicates that invoke
+themselves.
+
+\begin{exercise}\label{exercise:stack}
+Implement a stack of integers using a singly linked list data
+structure: implement functions \lstinline!create_stack!,
+\lstinline!stack_push!, \lstinline!stack_pop!, and
+\lstinline!stack_dispose!. In order to be able to specify the
+precondition of \lstinline!stack_pop!, your predicate will need
+to have a parameter that specifies the number of elements in
+the stack. Function \lstinline!stack_dispose! may be called
+only on an empty stack. Do not attempt to specify the contents
+of the stack; this is not possible with the annotation elements
+we have seen. You will need to use conditional assertions:
+\lstinline!condition ? assertion1 : assertion2!. Note: VeriFast
+does not allow the use of field dereferences in
+\lstinline!open! statements. If you want to use the value of a
+field in an \lstinline!open! statement, you must first store
+the value in a local variable. Verify the following main
+function:
+\end{exercise}
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_pop(s);
+    stack_pop(s);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+Now, let's extend the solution to Exercise~\ref{exercise:stack}
+on page~\pageref{solution:stack} with a
+\lstinline!stack_is_empty! function. Recall the predicate
+definitions:
+\begin{lstlisting}
+predicate nodes(struct node *node, int count) =
+    node == 0 ?
+        count == 0
+    :
+        0 < count
+        &*& node->next |-> ?next &*& node->value |-> ?value
+        &*& malloc_block_node(node) &*& nodes(next, count - 1);
+
+predicate stack(struct stack *stack, int count) =
+    stack->head |-> ?head &*& malloc_block_stack(stack) &*& 0 <= count &*& nodes(head, count);
+\end{lstlisting}
+
+Here's a first stab at a \lstinline!stack_is_empty! function:
+\begin{lstlisting}
+bool stack_is_empty(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count) &*& result == (count == 0);
+{
+    //@ open stack(stack, count);
+    bool result = stack->head == 0;
+    //@ close stack(stack, count);
+    return result;
+}
+\end{lstlisting}
+The function does not verify. VeriFast complains that it cannot
+prove the condition \lstinline!result == (count == 0)! in the
+postcondition. Indeed, if we look at the assumptions in the
+Assumptions pane, they are insufficient to prove this
+condition. The problem is that the relationship between the
+value of the head pointer and the number of nodes is hidden
+inside the \lstinline!nodes! predicate. We need to open the
+predicate, so that the information is added to the assumptions.
+Of course, we then need to close it again so that we can close
+the \lstinline!stack! predicate.
+\begin{lstlisting}
+bool stack_is_empty(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count) &*& result == (count == 0);
+{
+    //@ open stack(stack, count);
+    struct node *head = stack->head;
+    //@ open nodes(head, count);
+    bool result = stack->head == 0;
+    //@ close nodes(head, count);
+    //@ close stack(stack, count);
+    return result;
+}
+\end{lstlisting}
+The function now verifies. What happens exactly is the
+following. When VeriFast executes the open statement, it
+produces the conditional assertion in the body of the
+\lstinline!nodes! predicate. This causes it to perform a
+\emph{case split}. This means that the rest of the function is
+verified twice: once under the assumption that the condition is
+true, and once under the assumption that the condition is
+false. In other words, the execution path splits into two
+execution paths, or two \emph{branches}. On both branches, the
+postcondition can now be proved easily: on the first branch, we
+get the assumptions \lstinline!head == 0! and %
+\lstinline!count == 0!, and on the second branch we get
+\lstinline$head != 0$ and \lstinline$0 < count$.
+
+\begin{exercise}\label{exercise:stack2}
+Modify function \lstinline!stack_dispose! so that it works even
+if the stack still contains some elements. Use a recursive
+helper function.\footnote{Warning: VeriFast does not verify
+termination; it does not complain about infinite recursion or
+infinite loops. That is still your own responsibility.}
+\end{exercise}
+
+Notice that VeriFast performs a case split when verifying an
+\lstinline!if! statement.
+
+\begin{exercise}\label{exercise:stack4}
+Add a function \lstinline!stack_get_sum! that returns the sum
+of the values of the elements on the stack. Use a recursive
+helper function. The contract need not specify the return value
+(since we did not see how to do that yet).
+\end{exercise}
+
+\section{Loops}
+
+In Exercise~\ref{exercise:stack2}, we implemented
+\lstinline!stack_dispose! using a recursive function. However,
+this is not an optimal implementation. If our data structure
+contains very many elements, we may create too many activation
+records and overflow the call stack. It is more optimal to
+implement the function using a loop. Here's a first attempt:
+\begin{lstlisting}
+void stack_dispose(struct stack *stack)
+    //@ requires stack(stack, _);
+    //@ ensures true;
+{
+    //@ open stack(stack, _);
+    struct node *n = stack->head;
+    while (n != 0)
+    {
+        //@ open nodes(n, _);
+        struct node *next = n->next;
+        free(n);
+        n = next;
+    }
+    //@ open nodes(0, _);
+    free(stack);
+}
+\end{lstlisting}
+This function does not verify. VeriFast complains at the loop
+because the loop does not specify a loop invariant. VeriFast
+needs a loop invariant so that it can verify an arbitrary
+sequence of loop iterations by verifying the loop body once,
+starting from a symbolic state that represents the start of an
+arbitrary loop iteration (not just the first iteration).
+
+Specifically, VeriFast verifies a loop as follows:
+\begin{itemize}
+\item First, it consumes the loop invariant.
+\item Then, it removes the remaining heap chunks from the
+    heap (but it remembers them).
+\item Then, it assigns a fresh logical symbol to each local
+    variable that is modified in the loop body.
+\item Then, it produces the loop invariant.
+\item Then, it performs a case split on the loop condition:
+    \begin{itemize}
+    \item If the condition is true:
+    \begin{itemize}
+    \item It verifies the loop body,
+    \item then it consumes the loop invariant,
+    \item and then finally it checks for leaks.
+        After this step this execution path is
+        finished.
+    \end{itemize}
+    \item If the condition is false, VeriFast puts the
+        heap chunks that were removed in Step 2 back
+        into the heap, and then verification continues
+        after the loop.
+    \end{itemize}
+\end{itemize}
+Notice that this means that the loop can access only those heap
+chunks that are mentioned in the loop invariant.
+
+The correct loop invariant for the above function is as
+follows:
+\begin{lstlisting}
+void stack_dispose(struct stack *stack)
+    //@ requires stack(stack, _);
+    //@ ensures true;
+{
+    //@ open stack(stack, _);
+    struct node *n = stack->head;
+    while (n != 0)
+        //@ invariant nodes(n, _);
+    {
+        //@ open nodes(n, _);
+        struct node *next = n->next;
+        free(n);
+        n = next;
+    }
+    //@ open nodes(0, _);
+    free(stack);
+}
+\end{lstlisting}
+
+You can inspect the first branch of the execution of the loop
+by placing the cursor at the closing brace of the loop body and
+choosing the \textbf{Run to cursor} command. Find the
+\textit{Executing statement} step for the \lstinline!while!
+statement. Notice that this step is followed by a
+\textit{Producing assertion} step and a \textit{Consuming
+assertion} step. Notice that between these two steps, the value
+of variable \lstinline!n! changes from \lstinline!head! to
+\lstinline!n!, and all chunks are removed from the symbolic
+heap. Further notice that in the next step, the assumption
+\lstinline!(not (= n 0))! is added to the Assumptions pane.
+
+You can inspect the second branch of the execution of the loop
+by placing the cursor at the closing brace of the function body
+and choosing the \textbf{Run to cursor} command. Notice that
+the same things happen as in the first branch, except that the
+loop body is not executed, and the assumption %
+\lstinline!(= n 0)! is added to the Assumptions pane.
+
+\begin{exercise}\label{exercise:stack3}
+Specify and implement function \lstinline!stack_popn!, which
+pops a given number of elements from the stack (and returns
+\lstinline!void!). You may call \lstinline!stack_pop!
+internally. Use a \lstinline!while! loop. Notice that your loop
+invariant must not only enable verification of the loop body,
+but must also maintain the relationship between the current
+state and the initial state, sufficiently to prove the
+postcondition. This often means that you should not overwrite
+the function parameter values, since you typically need the
+original values in the loop invariant.
+\end{exercise}
+
+\section{Solutions to Exercises}
+
+\subsection{Exercise \ref{exercise:account1}}
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct account {
+    int balance;
+};
+
+struct account *create_account()
+    //@ requires true;
+    //@ ensures account_balance(result, 0) &*& malloc_block_account(result);
+{
+    struct account *myAccount = malloc(sizeof(struct account));
+    if (myAccount == 0) { abort(); }
+    myAccount->balance = 0;
+    return myAccount;
+}
+
+void account_set_balance(struct account *myAccount, int newBalance)
+    //@ requires account_balance(myAccount, _);
+    //@ ensures account_balance(myAccount, newBalance);
+{
+    myAccount->balance = newBalance;
+}
+
+void account_dispose(struct account *myAccount)
+    //@ requires account_balance(myAccount, _) &*& malloc_block_account(myAccount);
+    //@ ensures true;
+{
+    free(myAccount);
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account *myAccount = create_account();
+    account_set_balance(myAccount, 5);
+    account_dispose(myAccount);
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:account2}}
+
+\begin{lstlisting}
+void account_deposit(struct account *myAccount, int amount)
+    //@ requires account_balance(myAccount, ?theBalance) &*& 0 <= amount;
+    //@ ensures account_balance(myAccount, theBalance + amount);
+{
+    myAccount->balance += amount;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:account3}}
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct account {
+    int limit;
+    int balance;
+};
+
+struct account *create_account(int limit)
+    //@ requires limit <= 0;
+    //@ ensures result->limit |-> limit &*& result->balance |-> 0 &*& malloc_block_account(result);
+{
+    struct account *myAccount = malloc(sizeof(struct account));
+    if (myAccount == 0) { abort(); }
+    myAccount->limit = limit;
+    myAccount->balance = 0;
+    return myAccount;
+}
+
+int account_get_balance(struct account *myAccount)
+    //@ requires myAccount->balance |-> ?theBalance;
+    //@ ensures myAccount->balance |-> theBalance &*& result == theBalance;
+{
+    return myAccount->balance;
+}
+
+void account_deposit(struct account *myAccount, int amount)
+    //@ requires myAccount->balance |-> ?theBalance;
+    //@ ensures myAccount->balance |-> theBalance + amount;
+{
+    myAccount->balance += amount;
+}
+
+int account_withdraw(struct account *myAccount, int amount)
+    //@ requires myAccount->limit |-> ?limit &*& myAccount->balance |-> ?balance &*& 0 <= amount;
+    /*@ ensures myAccount->limit |-> limit &*& myAccount->balance |-> balance - result &*&
+            result == (balance - amount < limit ? balance - limit : amount); @*/
+{
+    int result = myAccount->balance - amount < myAccount->limit ?
+        myAccount->balance - myAccount->limit : amount;
+    myAccount->balance -= result;
+    return result;
+}
+
+void account_dispose(struct account *myAccount)
+    //@ requires myAccount->limit |-> _ &*& myAccount->balance |-> _ &*& malloc_block_account(myAccount);
+    //@ ensures true;
+{
+    free(myAccount);
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:predicates}}
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct account {
+    int limit;
+    int balance;
+};
+
+/*@
+predicate account_pred(struct account *myAccount, int theLimit, int theBalance) =
+    myAccount->limit |-> theLimit &*& myAccount->balance |-> theBalance
+    &*& malloc_block_account(myAccount);
+@*/
+
+struct account *create_account(int limit)
+    //@ requires limit <= 0;
+    //@ ensures account_pred(result, limit, 0);
+{
+    struct account *myAccount = malloc(sizeof(struct account));
+    if (myAccount == 0) { abort(); }
+    myAccount->limit = limit;
+    myAccount->balance = 0;
+    //@ close account_pred(myAccount, limit, 0);
+    return myAccount;
+}
+
+int account_get_balance(struct account *myAccount)
+    //@ requires account_pred(myAccount, ?limit, ?balance);
+    //@ ensures account_pred(myAccount, limit, balance) &*& result == balance;
+{
+    //@ open account_pred(myAccount, limit, balance);
+    int result = myAccount->balance;
+    //@ close account_pred(myAccount, limit, balance);
+    return result;
+}
+
+void account_deposit(struct account *myAccount, int amount)
+    //@ requires account_pred(myAccount, ?limit, ?balance) &*& 0 <= amount;
+    //@ ensures account_pred(myAccount, limit, balance + amount);
+{
+    //@ open account_pred(myAccount, limit, balance);
+    myAccount->balance += amount;
+    //@ close account_pred(myAccount, limit, balance + amount);
+}
+
+int account_withdraw(struct account *myAccount, int amount)
+    //@ requires account_pred(myAccount, ?limit, ?balance) &*& 0 <= amount;
+    /*@ ensures account_pred(myAccount, limit, balance - result)
+            &*& result == (balance - amount < limit ? balance - limit : amount); @*/
+{
+    //@ open account_pred(myAccount, limit, balance);
+    int result = myAccount->balance - amount < myAccount->limit ?
+        myAccount->balance - myAccount->limit : amount;
+    myAccount->balance -= result;
+    //@ close account_pred(myAccount, limit, balance - result);
+    return result;
+}
+
+void account_dispose(struct account *myAccount)
+    //@ requires account_pred(myAccount, _, _);
+    //@ ensures true;
+{
+    //@ open account_pred(myAccount, _, _);
+    free(myAccount);
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account *myAccount = create_account(-100);
+    account_deposit(myAccount, 200);
+    int w1 = account_withdraw(myAccount, 50);
+    assert(w1 == 50);
+    int b1 = account_get_balance(myAccount);
+    assert(b1 == 150);
+    int w2 = account_withdraw(myAccount, 300);
+    assert(w2 == 250);
+    int b2 = account_get_balance(myAccount);
+    assert(b2 == -100);
+    account_dispose(myAccount);
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack}}\label{solution:stack}
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct node {
+    struct node *next;
+    int value;
+};
+
+struct stack {
+    struct node *head;
+};
+
+/*@
+
+predicate nodes(struct node *node, int count) =
+    node == 0 ?
+        count == 0
+    :
+        0 < count
+        &*& node->next |-> ?next &*& node->value |-> ?value
+        &*& malloc_block_node(node) &*& nodes(next, count - 1);
+
+predicate stack(struct stack *stack, int count) =
+    stack->head |-> ?head &*& malloc_block_stack(stack) &*& 0 <= count &*& nodes(head, count);
+
+@*/
+
+struct stack *create_stack()
+    //@ requires true;
+    //@ ensures stack(result, 0);
+{
+    struct stack *stack = malloc(sizeof(struct stack));
+    if (stack == 0) { abort(); }
+    stack->head = 0;
+    //@ close nodes(0, 0);
+    //@ close stack(stack, 0);
+    return stack;
+}
+
+void stack_push(struct stack *stack, int value)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count + 1);
+{
+    //@ open stack(stack, count);
+    struct node *n = malloc(sizeof(struct node));
+    if (n == 0) { abort(); }
+    n->next = stack->head;
+    n->value = value;
+    stack->head = n;
+    //@ close nodes(n, count + 1);
+    //@ close stack(stack, count + 1);
+}
+
+int stack_pop(struct stack *stack)
+    //@ requires stack(stack, ?count) &*& 0 < count;
+    //@ ensures stack(stack, count - 1);
+{
+    //@ open stack(stack, count);
+    struct node *head = stack->head;
+    //@ open nodes(head, count);
+    int result = head->value;
+    stack->head = head->next;
+    free(head);
+    //@ close stack(stack, count - 1);
+    return result;
+}
+
+void stack_dispose(struct stack *stack)
+    //@ requires stack(stack, 0);
+    //@ ensures true;
+{
+    //@ open stack(stack, 0);
+    //@ open nodes(_, _);
+    free(stack);
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_pop(s);
+    stack_pop(s);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack2}}\label{solution:stack2}
+
+\begin{lstlisting}
+void nodes_dispose(struct node *n)
+    //@ requires nodes(n, _);
+    //@ ensures true;
+{
+    //@ open nodes(n, _);
+    if (n != 0) {
+        nodes_dispose(n->next);
+        free(n);
+    }
+}
+
+void stack_dispose(struct stack *stack)
+    //@ requires stack(stack, _);
+    //@ ensures true;
+{
+    //@ open stack(stack, _);
+    nodes_dispose(stack->head);
+    free(stack);
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack4}}\label{solution:stack4}
+
+\begin{lstlisting}
+int nodes_get_sum(struct node *nodes)
+    //@ requires nodes(nodes, ?count);
+    //@ ensures nodes(nodes, count);
+{
+    int result = 0;
+    //@ open nodes(nodes, count);
+    if (nodes != 0) {
+        result = nodes_get_sum(nodes->next);
+        result += nodes->value;
+    }
+    //@ close nodes(nodes, count);
+    return result;
+}
+
+int stack_get_sum(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count);
+{
+    //@ open stack(stack, count);
+    int result = nodes_get_sum(stack->head);
+    //@ close stack(stack, count);
+    return result;
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack3}}\label{solution:stack3}
+
+\begin{lstlisting}
+void stack_popn(struct stack *stack, int n)
+    //@ requires stack(stack, ?count) &*& 0 <= n &*& n <= count;
+    //@ ensures stack(stack, count - n);
+{
+    int i = 0;
+    while (i < n)
+        //@ invariant stack(stack, count - i) &*& i <= n;
+    {
+        stack_pop(stack);
+        i++;
+    }
+}
+\end{lstlisting}
+
+\end{document}

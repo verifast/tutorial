@@ -50,10 +50,10 @@ may also be unknown unsoundnesses.} that the program
     the source code.
 \end{itemize}
 
-We will now proceed to show an example of each of these types
-of errors and how the tool reports them. To try the examples
-and exercises in this tutorial yourself, please download the
-release from the VeriFast website at
+We will now proceed to introduce the tool's features step by
+step. To try the examples and exercises in this tutorial
+yourself, please download the release from the VeriFast website
+at
 \begin{center}
 \texttt{http://www.cs.kuleuven.be/\symbol{126}bartj/verifast/}
 \end{center}
@@ -791,6 +791,105 @@ the function parameter values, since you typically need the
 original values in the loop invariant.
 \end{exercise}
 
+\section{Inductive Datatypes}
+
+Let's return to our initial annotated stack implementation (the
+solution to Exercise~\ref{exercise:stack}). The annotations do
+not specify full functional correctness. In particular, the
+contract of function \lstinline!stack_pop! does not specify the
+function's return value. As a result, using these annotations,
+we cannot verify the following main function:
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    int result1 = stack_pop(s);
+    assert(result1 == 20);
+    int result2 = stack_pop(s);
+    assert(result2 == 10);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+In order to verify this main function, instead of tracking just
+the number of elements in the stack, we need to track the
+values of the elements as well. In other words, we need to
+track the precise sequence of elements currently stored by the
+stack. We can represent a sequence of integers using an
+\emph{inductive datatype} \lstinline!ints!:
+\begin{lstlisting}
+inductive ints = ints_nil | ints_cons(int, ints);
+\end{lstlisting}
+This declaration declares a type \lstinline!ints! with two
+\emph{constructors} \lstinline!ints_nil! and
+\lstinline!ints_cons!. \lstinline!ints_nil! represents the
+empty sequence. \lstinline!ints_cons! constructs a nonempty
+sequence given the \emph{head} (the first element) and the
+\emph{tail} (the remaining elements). For example, the sequence
+1,2,3 can be written as
+\begin{lstlisting}
+ints_cons(1, ints_cons(2, ints_cons(3, ints_nil)))
+\end{lstlisting}
+
+\begin{exercise}\label{exercise:stack4}
+Replace the \lstinline!count! parameter of the
+\lstinline!nodes! and \lstinline!stack! predicates with a
+\lstinline!values! parameter of type \lstinline!ints! and
+update the predicate bodies. Further update the functions
+\lstinline!create_stack!, \lstinline!stack_push!, and
+\lstinline!stack_dispose!.
+\end{exercise}
+
+How should we update the annotations for function
+\lstinline!stack_pop!? We need to refer to the tail of the
+current sequence in the postcondition and in the close
+statement. Furthermore, in order to specify the return value,
+we need to refer to the head of the current sequence. We can do
+so using \emph{fixpoint functions}:
+\begin{lstlisting}
+fixpoint int ints_head(ints values) {
+    switch (values) {
+        case ints_nil: return 0;
+        case ints_cons(value, values0): return value;
+    }
+}
+
+fixpoint ints ints_tail(ints values) {
+    switch (values) {
+        case ints_nil: return ints_nil;
+        case ints_cons(value, values0): return values0;
+    }
+}
+\end{lstlisting}
+Notice that we can use switch statements on inductive
+datatypes. There must be exactly one case for each constructor.
+In a case for a constructor that takes parameters, the
+specified parameter names are bound to the corresponding
+constructor argument values that were used when the value was
+constructed. The body of a fixpoint function must be a switch
+statement on one of the function's parameters. Furthermore, the
+body of each case must be a return statement.
+
+In contrast to regular C functions, a fixpoint function may be
+used in any place where an expression is expected in an
+annotation. This means we can use the \lstinline!ints_head! and
+\lstinline!ints_tail! functions to adapt function
+\lstinline!stack_pop! to the new predicate definitions, and to
+specify the return value.
+
+\begin{exercise}\label{exercise:stack4bis}
+Do so.
+\end{exercise}
+
+We have now specified full functional correctness of our stack
+implementation, and VeriFast can now verify the new main
+function.
+
 \section{Solutions to Exercises}
 
 \subsection{Exercise \ref{exercise:account1}}
@@ -1151,6 +1250,106 @@ void stack_popn(struct stack *stack, int n)
         stack_pop(stack);
         i++;
     }
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack4}}\label{solution:stack4}
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct node {
+    struct node *next;
+    int value;
+};
+
+struct stack {
+    struct node *head;
+};
+
+/*@
+
+inductive ints = ints_nil | ints_cons(int, ints);
+
+fixpoint int ints_head(ints values) {
+    switch (values) {
+        case ints_nil: return 0;
+        case ints_cons(value, values0): return value;
+    }
+}
+
+fixpoint ints ints_tail(ints values) {
+    switch (values) {
+        case ints_nil: return ints_nil;
+        case ints_cons(value, values0): return values0;
+    }
+}
+
+predicate nodes(struct node *node, ints values) =
+    node == 0 ?
+        values == ints_nil
+    :
+        node->next |-> ?next &*& node->value |-> ?value &*& malloc_block_node(node) &*&
+        nodes(next, ?values0) &*& values == ints_cons(value, values0);
+
+predicate stack(struct stack *stack, ints values) =
+    stack->head |-> ?head &*& malloc_block_stack(stack) &*& nodes(head, values);
+
+@*/
+
+struct stack *create_stack()
+    //@ requires true;
+    //@ ensures stack(result, ints_nil);
+{
+    struct stack *stack = malloc(sizeof(struct stack));
+    if (stack == 0) { abort(); }
+    stack->head = 0;
+    //@ close nodes(0, ints_nil);
+    //@ close stack(stack, ints_nil);
+    return stack;
+}
+
+void stack_push(struct stack *stack, int value)
+    //@ requires stack(stack, ?values);
+    //@ ensures stack(stack, ints_cons(value, values));
+{
+    //@ open stack(stack, values);
+    struct node *n = malloc(sizeof(struct node));
+    if (n == 0) { abort(); }
+    n->next = stack->head;
+    n->value = value;
+    stack->head = n;
+    //@ close nodes(n, ints_cons(value, values));
+    //@ close stack(stack, ints_cons(value, values));
+}
+
+void stack_dispose(struct stack *stack)
+    //@ requires stack(stack, ints_nil);
+    //@ ensures true;
+{
+    //@ open stack(stack, ints_nil);
+    //@ open nodes(_, _);
+    free(stack);
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack4bis}}\label{solution:stack4bis}
+
+\begin{lstlisting}
+int stack_pop(struct stack *stack)
+    //@ requires stack(stack, ?values) &*& values != ints_nil;
+    //@ ensures stack(stack, ints_tail(values)) &*& result == ints_head(values);
+{
+    //@ open stack(stack, values);
+    struct node *head = stack->head;
+    //@ open nodes(head, values);
+    int result = head->value;
+    stack->head = head->next;
+    free(head);
+    //@ close stack(stack, ints_tail(values));
+    return result;
 }
 \end{lstlisting}
 

@@ -872,8 +872,9 @@ In a case for a constructor that takes parameters, the
 specified parameter names are bound to the corresponding
 constructor argument values that were used when the value was
 constructed. The body of a fixpoint function must be a switch
-statement on one of the function's parameters. Furthermore, the
-body of each case must be a return statement.
+statement on one of the function's parameters (called the
+\emph{inductive parameter}). Furthermore, the body of each case
+must be a return statement.
 
 In contrast to regular C functions, a fixpoint function may be
 used in any place where an expression is expected in an
@@ -889,6 +890,136 @@ Do so.
 We have now specified full functional correctness of our stack
 implementation, and VeriFast can now verify the new main
 function.
+
+\begin{exercise}\label{exercise:stack5}
+Add a C function \lstinline!stack_get_sum! that returns the sum
+of the elements of a given stack. Implement it using a
+recursive helper function \lstinline!nodes_get_sum!. Specify
+the new C functions using a recursive fixpoint function
+\lstinline!ints_get_sum!. Remember to turn off arithmetic
+overflow checking in the \textbf{Verify} menu. Verify the
+following main function:
+\end{exercise}
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    int sum = stack_get_sum(s);
+    assert(sum == 30);
+    int result1 = stack_pop(s);
+    assert(result1 == 20);
+    int result2 = stack_pop(s);
+    assert(result2 == 10);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+VeriFast supports recursive fixpoint functions. It enforces
+that they always terminate by allowing only direct recursion
+and by requiring that the value of the inductive parameter of a
+recursive call is a constructor argument of the value of the
+inductive parameter of the caller.
+
+\section{Arithmetic Overflow}
+
+Consider the following program:
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    int x = 2000000000 + 2000000000;
+    assert(0 <= x);
+    return 0;
+}
+\end{lstlisting}
+The behavior of this program is not uniquely defined by the C
+language. Specifically, the \lstinline!int! type supports only
+a finite range of integers, and furthermore the C language does
+not specify the bounds of this range. The bounds are
+\emph{implementation-dependent}. The C language does specify
+that the least and greatest value of type \lstinline!int! are
+given by the macros \lstinline!MIN_INT! and
+\lstinline!MAX_INT!, respectively, and that \lstinline!MIN_INT!
+is not greater than -32767 and that \lstinline!MAX_INT! is not
+less than 32767. Furthermore, the C language does not specify
+what happens if an arithmetic operation on type \lstinline!int!
+yields a value that is not a value of type \lstinline!int!.
+
+VeriFast does not attempt to be sound with respect to arbitrary
+C implementations (or even with respect to arbitrary
+standard-compliant ones). Specifically, it assumes that
+\lstinline!MIN_INT! equals $-2^{31}$ and \lstinline!MAX_INT!
+equals $2^{31}-1$.
+
+When symbolically evaluating an arithmetic operation in C code
+(i.e., not in an annotation), VeriFast checks that the result
+of the operation fits within the bounds of the result type,
+unless arithmetic overflow checking has been turned off in the
+\textbf{Verify} menu. As a result, VeriFast rejects the above
+program. It also rejects the following program:
+\begin{lstlisting}
+int int_add(int x, int y)
+    //@ requires true;
+    //@ ensures result == x + y;
+{
+    return x + y;
+}
+\end{lstlisting}
+Let's try to fix this function so that it works correctly on a
+32-bit machine. Here's a first attempt:
+\begin{lstlisting}
+int int_add(int x, int y)
+    //@ requires true;
+    //@ ensures result == x + y;
+{
+    if (0 <= x) {
+        if (MAX_INT - x < y) abort();
+    } else {
+        if (y < MIN_INT - x) abort();
+    }
+    return x + y;
+}
+\end{lstlisting}
+Even though this function works correctly on a 32-bit machine,
+VeriFast does not accept it. This is because VeriFast checks
+that the results of the arithmetic operations are within the
+bounds of the type, but it does not assume that the original
+values are within the bounds of the type. These assumptions are
+not generated automatically for verification performance
+reasons. In order to generate these assumptions, we must insert
+\lstinline!assume_is_int! ghost commands into the code. The
+argument of an \lstinline!assume_is_int! command must be the
+name of a C local variable (i.e., not a local variable declared
+in an annotation). The following program verifies.
+\begin{lstlisting}
+int int_add(int x, int y)
+    //@ requires true;
+    //@ ensures result == x + y;
+{
+    //@ assume_is_int(x);
+    //@ assume_is_int(y);
+    if (0 <= x) {
+        if (MAX_INT - x < y) abort();
+    } else {
+        if (y < MIN_INT - x) abort();
+    }
+    return x + y;
+}
+\end{lstlisting}
+
+Note: The above overflow-checked integer addition
+implementation is probably not the most optimal one in terms of
+performance. For example, the x86 instruction set includes the
+INTO (Interrupt on Overflow) instruction, which causes a
+software interrupt if the overflow flag is set. An
+implementation that uses this instruction is likely to perform
+much better.
 
 \section{Solutions to Exercises}
 
@@ -1349,6 +1480,46 @@ int stack_pop(struct stack *stack)
     stack->head = head->next;
     free(head);
     //@ close stack(stack, ints_tail(values));
+    return result;
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack5}}\label{solution:stack5}
+
+\begin{lstlisting}
+/*@
+
+fixpoint int ints_sum(ints values) {
+    switch (values) {
+        case ints_nil: return 0;
+        case ints_cons(value, values0): return value + ints_sum(values0);
+    }
+}
+
+@*/
+
+int nodes_get_sum(struct node *node)
+    //@ requires nodes(node, ?values);
+    //@ ensures nodes(node, values) &*& result == ints_sum(values);
+{
+    //@ open nodes(node, values);
+    int result = 0;
+    if (node != 0) {
+        int tailSum = nodes_get_sum(node->next);
+        result = node->value + tailSum;
+    }
+    //@ close nodes(node, values);
+    return result;
+}
+
+int stack_get_sum(struct stack *stack)
+    //@ requires stack(stack, ?values);
+    //@ ensures stack(stack, values) &*& result == ints_sum(values);
+{
+    //@ open stack(stack, values);
+    int result = nodes_get_sum(stack->head);
+    //@ close stack(stack, values);
     return result;
 }
 \end{lstlisting}

@@ -791,7 +791,7 @@ the function parameter values, since you typically need the
 original values in the loop invariant.
 \end{exercise}
 
-\section{Inductive Datatypes}
+\section{Inductive Datatypes}\label{section:datatypes}
 
 Let's return to our initial annotated stack implementation (the
 solution to Exercise~\ref{exercise:stack}). The annotations do
@@ -924,6 +924,269 @@ that they always terminate by allowing only direct recursion
 and by requiring that the value of the inductive parameter of a
 recursive call is a constructor argument of the value of the
 inductive parameter of the caller.
+
+\section{Lemmas}
+
+Let's return to our initial annotated stack implementation (the
+solution to Exercise~\ref{exercise:stack}). Let's add a
+\lstinline!stack_get_count! function that returns the number of
+elements in the stack, implemented using a loop:
+\begin{lstlisting}
+int stack_get_count(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count) &*& result == count;
+{
+    //@ open stack(stack, count);
+    struct node *head = stack->head;
+    struct node *n = head;
+    int i = 0;
+    while (n != 0)
+        //@ invariant true;
+    {
+        n = n->next;
+        i++;
+    }
+    //@ close stack(stack, count);
+    return i;
+}
+\end{lstlisting}
+Clearly, the loop invariant \lstinline!true! will not do. What
+should it be? We need to express that \lstinline!n! is
+somewhere inside our sequence of nodes. One way to do this is
+by working with \emph{linked list segments} (or \emph{list
+segments} for short). We state in the loop invariant that there
+is a list segment from \lstinline!head! to \lstinline!n! and a
+separate list segment from \lstinline!n! to 0:
+\begin{lstlisting}
+//@ invariant lseg(head, n, i) &*& lseg(n, 0, count - i);
+\end{lstlisting}
+We can define the \lstinline!lseg! predicate as follows:
+\begin{lstlisting}
+predicate lseg(struct node *first, struct node *last, int count) =
+    first == last ?
+        count == 0
+    :
+        0 < count &*& first != 0 &*&
+        first->value |-> _ &*& first->next |-> ?next &*& malloc_block_node(first) &*&
+        lseg(next, last, count - 1);
+\end{lstlisting}
+We are not done yet. We need to establish the loop invariant
+when first entering the loop. That is, we need to establish
+\begin{lstlisting}
+lseg(head, head, 0) &*& lseg(head, 0, count)
+\end{lstlisting}
+The first conjunct is easy: it is empty, so we can just close
+it. The second conjunct requires that we rewrite the
+\lstinline!nodes(head, count)! chunk into an equivalent
+\lstinline!lseg(head, 0, count)! chunk. Notice that we cannot
+do so using a statically bounded number of open and close
+operations. We need to use either a loop or a recursive
+function. Since VeriFast does not allow loops inside
+annotations, we will use a recursive function. We will not use
+a regular C function, since the function has no purpose at run
+time; furthermore, we cannot use a fixpoint function, since the
+latter cannot include open or close statements. VeriFast
+supports a third kind of function, called \emph{lemma
+functions}. They are just like regular C functions, except that
+they may not perform field assignments or call regular
+functions, and they must always terminate. It follows that
+calling them has no effect at run time. Their only purpose is
+to transform some heap chunks into an equivalent set of heap
+chunks, i.e. different heap chunks that represent the same
+actual memory values. In contrast with fixpoint functions, they
+may be called only through separate call statements, not from
+within expressions.
+
+VeriFast checks termination of a lemma function by allowing
+only direct recursion and by checking each recursive call as
+follows: first, if, after consuming the precondition of the
+recursive call, a field chunk is left in the symbolic heap,
+then the call is allowed. This is induction on heap size.
+Otherwise, if the body of the lemma function is a switch
+statement on a parameter whose type is an inductive datatype,
+then the argument for this parameter in the recursive call must
+be a constructor argument of the caller's argument for the same
+parameter. This is induction on an inductive parameter.
+Finally, if the body of the lemma function is not such a switch
+statement, then the first heap chunk consumed by the
+precondition of the callee must have been obtained from the
+first heap chunk consumed by the precondition of the caller
+through one or more open operations. This is induction on the
+derivation of the first conjunct of the precondition.
+
+We can transform a \lstinline!nodes! chunk into an
+\lstinline!lseg! chunk using the following lemma function:
+\begin{lstlisting}
+lemma void nodes_to_lseg_lemma(struct node *first)
+    requires nodes(first, ?count);
+    ensures lseg(first, 0, count);
+{
+    open nodes(first, count);
+    if (first != 0) {
+        nodes_to_lseg_lemma(first->next);
+    }
+    close lseg(first, 0, count);
+}
+\end{lstlisting}
+Notice that this lemma is admitted since it performs induction
+on heap size.
+
+\begin{exercise}\label{exercise:stack6}
+We will need the inverse operation as well. Write a lemma
+function \lstinline!lseg_to_nodes_lemma!.
+\end{exercise}
+
+The \lstinline!stack_get_count! function now looks as follows:
+\begin{lstlisting}
+int stack_get_count(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count) &*& result == count;
+{
+    //@ open stack(stack, count);
+    struct node *head = stack->head;
+    //@ nodes_to_lseg_lemma(head);
+    struct node *n = head;
+    int i = 0;
+    //@ close lseg(head, head, 0);
+    while (n != 0)
+        //@ invariant lseg(head, n, i) &*& lseg(n, 0, count - i);
+    {
+        //@ open lseg(n, 0, count - i);
+        n = n->next;
+        i++;
+        // Error!
+    }
+    //@ open lseg(0, 0, _);
+    //@ lseg_to_nodes_lemma(head);
+    //@ close stack(stack, count);
+    return i;
+}
+\end{lstlisting}
+We are almost done. All that is left to do is to fix the error
+that we get at the end of the loop body. At that point, we have
+the following chunks:
+\begin{lstlisting}
+lseg(head, ?old_n, i - 1) &*& old_n->value |-> _ &*& old_n->next |-> n &*&
+malloc_block_node(old_n) &*& lseg(n, 0, count - i)
+\end{lstlisting}
+We need to transform these into the following:
+\begin{lstlisting}
+lseg(head, n, i) &*& lseg(n, 0, count - i)
+\end{lstlisting}
+That is, we need to append the node at the old value of
+\lstinline!n! to the end of the list segment that starts at
+\lstinline!head!. We will again need to use a lemma function
+for this. Here's a first attempt:
+\begin{lstlisting}
+lemma void lseg_add_lemma(struct node *first)
+    requires
+        lseg(first, ?last, ?count) &*& last != 0 &*& last->value |-> _ &*& last->next |-> ?next &*&
+        malloc_block_node(last);
+    ensures lseg(first, next, count + 1);
+{
+    open lseg(first, last, count);
+    if (first == last) {
+        close lseg(next, next, 0);
+    } else {
+        lseg_add_lemma(first->next);
+    }
+    close lseg(first, next, count + 1);
+}
+\end{lstlisting}
+VeriFast complains while trying to perform the final close
+operation, on the path where \lstinline!first! equals
+\lstinline!last!. It has assumed that \lstinline!first! equals
+\lstinline!next! and it cannot prove that \lstinline!count + 1!
+equals zero. In our scenario, \lstinline!first! never equals
+\lstinline!next!, since \lstinline!first! always points to a
+node of the stack, and \lstinline!next! either points to a
+separate node or equals 0. However, the precondition of our
+lemma function does not express this. In order to include this
+information, we need to require the list segment from
+\lstinline!next! to 0 as well. By opening and closing this list
+segment before we perform the final close operation, we obtain
+the information that \lstinline!first! and \lstinline!next! are
+distinct. Specifically, whenever VeriFast produces a field
+chunk, and another field chunk for the same field is already in
+the symbolic heap, it adds an assumption stating that the field
+chunks belong to distinct struct instances.
+
+We obtain the following \lstinline!lseg_add_lemma! and
+\lstinline!stack_get_count! functions:
+\begin{lstlisting}
+/*@
+lemma void lseg_add_lemma(struct node *first)
+    requires
+        lseg(first, ?last, ?count) &*& last != 0 &*& last->value |-> _ &*& last->next |-> ?next &*&
+        malloc_block_node(last) &*& lseg(next, 0, ?count0);
+    ensures lseg(first, next, count + 1) &*& lseg(next, 0, count0);
+{
+    open lseg(first, last, count);
+    if (first == last) {
+        close lseg(next, next, 0);
+    } else {
+        lseg_add_lemma(first->next);
+    }
+    open lseg(next, 0, count0);
+    close lseg(next, 0, count0);
+    close lseg(first, next, count + 1);
+}
+@*/
+
+int stack_get_count(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count) &*& result == count;
+{
+    //@ open stack(stack, count);
+    struct node *head = stack->head;
+    //@ nodes_to_lseg_lemma(head);
+    struct node *n = head;
+    int i = 0;
+    //@ close lseg(head, head, 0);
+    while (n != 0)
+        //@ invariant lseg(head, n, i) &*& lseg(n, 0, count - i);
+    {
+        //@ open lseg(n, 0, count - i);
+        n = n->next;
+        i++;
+        //@ lseg_add_lemma(head);
+    }
+    //@ open lseg(0, 0, _);
+    //@ lseg_to_nodes_lemma(head);
+    //@ close stack(stack, count);
+    return i;
+}
+\end{lstlisting}
+These now verify.
+
+\begin{exercise}\label{exercise:stack7}
+Verify the following function:
+\end{exercise}
+\begin{lstlisting}
+void stack_push_all(struct stack *stack, struct stack *other)
+    //@ requires stack(stack, ?count) &*& stack(other, ?count0);
+    //@ ensures stack(stack, count0 + count);
+{
+    struct node *head0 = other->head;
+    free(other);
+    struct node *n = head0;
+    if (n != 0) {
+        while (n->next != 0)
+        {
+            n = n->next;
+        }
+        n->next = stack->head;
+        stack->head = head0;
+    }
+}
+\end{lstlisting}
+
+\begin{exercise}\label{exercise:stack8}
+Implement, specify, and verify a function
+\lstinline!stack_reverse! that performs in-place reversal of a
+stack, i.e., without any memory allocation. Verify full
+functional correctness (see Section~\ref{section:datatypes}).
+\end{exercise}
 
 \section{Arithmetic Overflow}
 
@@ -1521,6 +1784,155 @@ int stack_get_sum(struct stack *stack)
     int result = nodes_get_sum(stack->head);
     //@ close stack(stack, values);
     return result;
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack6}}\label{solution:stack6}
+
+\begin{lstlisting}
+lemma void lseg_to_nodes_lemma(struct node *first)
+    requires lseg(first, 0, ?count);
+    ensures nodes(first, count);
+{
+    open lseg(first, 0, count);
+    if (first != 0) {
+        lseg_to_nodes_lemma(first->next);
+    }
+    close nodes(first, count);
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack7}}\label{solution:stack7}
+
+\begin{lstlisting}
+/*@
+
+lemma void lseg_append_lemma(struct node *first)
+    requires lseg(first, ?n, ?count) &*& lseg(n, 0, ?count0);
+    ensures lseg(first, 0, count + count0);
+{
+    open lseg(first, n, count);
+    if (first != n) {
+        open lseg(n, 0, count0);
+        close lseg(n, 0, count0);
+        lseg_append_lemma(first->next);
+        close lseg(first, 0, count + count0);
+    }
+}
+
+@*/
+
+void stack_push_all(struct stack *stack, struct stack *other)
+    //@ requires stack(stack, ?count) &*& stack(other, ?count0);
+    //@ ensures stack(stack, count0 + count);
+{
+    //@ open stack(stack, count);
+    //@ nodes_to_lseg_lemma(stack->head);
+    //@ open stack(other, count0);
+    //@ nodes_to_lseg_lemma(other->head);
+    struct node *head0 = other->head;
+    free(other);
+    struct node *n = head0;
+    //@ open lseg(head0, 0, count0);
+    if (n != 0) {
+        //@ close lseg(head0, head0, 0);
+        while (n->next != 0)
+            /*@
+            invariant
+                lseg(head0, n, ?count1) &*&
+                n != 0 &*& n->value |-> _ &*& n->next |-> ?next &*& malloc_block_node(n) &*&
+                lseg(next, 0, count0 - count1 - 1);
+            @*/
+        {
+            n = n->next;
+            //@ lseg_add_lemma(head0);
+            //@ open lseg(next, 0, count0 - count1 - 1);
+        }
+        //@ open lseg(0, 0, _);
+        n->next = stack->head;
+        //@ lseg_add_lemma(head0);
+        //@ lseg_append_lemma(head0);
+        stack->head = head0;
+    }
+    //@ lseg_to_nodes_lemma(stack->head);
+    //@ close stack(stack, count0 + count);
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack8}}\label{solution:stack8}
+
+\begin{lstlisting}
+/*@
+
+fixpoint ints append(ints values1, ints values2) {
+    switch (values1) {
+        case ints_nil: return values2;
+        case ints_cons(h, t): return ints_cons(h, append(t, values2));
+    }
+}
+
+lemma void append_nil_lemma(ints values)
+    requires true;
+    ensures append(values, ints_nil) == values;
+{
+    switch (values) {
+        case ints_nil:
+        case ints_cons(h, t):
+            append_nil_lemma(t);
+    }
+}
+
+lemma void append_assoc_lemma(ints values1, ints values2, ints values3)
+    requires true;
+    ensures append(append(values1, values2), values3) == append(values1, append(values2, values3));
+{
+    switch (values1) {
+        case ints_nil:
+        case ints_cons(h, t):
+            append_assoc_lemma(t, values2, values3);
+    }
+}
+
+fixpoint ints reverse(ints values) {
+    switch (values) {
+        case ints_nil: return ints_nil;
+        case ints_cons(h, t): return append(reverse(t), ints_cons(h, ints_nil));
+    }
+}
+
+@*/
+
+void stack_reverse(struct stack *stack)
+    //@ requires stack(stack, ?values);
+    //@ ensures stack(stack, reverse(values));
+{
+    //@ open stack(stack, values);
+    struct node *n = stack->head;
+    struct node *m = 0;
+    //@ close nodes(m, ints_nil);
+    //@ append_nil_lemma(reverse(values));
+    while (n != 0)
+        /*@
+        invariant
+            nodes(m, ?values1) &*& nodes(n, ?values2) &*&
+            reverse(values) == append(reverse(values2), values1);
+        @*/
+    {
+        //@ open nodes(n, values2);
+        struct node *next = n->next;
+        //@ assert nodes(next, ?values2tail) &*& n->value |-> ?value;
+        n->next = m;
+        m = n;
+        n = next;
+        //@ close nodes(m, ints_cons(value, values1));
+        //@ append_assoc_lemma(reverse(values2tail), ints_cons(value, ints_nil), values1);
+    }
+    //@ open nodes(n, _);
+    stack->head = m;
+    //@ close stack(stack, reverse(values));
 }
 \end{lstlisting}
 

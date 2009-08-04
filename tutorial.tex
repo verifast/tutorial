@@ -1284,6 +1284,433 @@ software interrupt if the overflow flag is set. An
 implementation that uses this instruction is likely to perform
 much better.
 
+\section{Function pointers}\label{section:function-pointers}
+
+Let's write a function that takes a stack and removes those elements that do not satisfy a given predicate:
+\begin{lstlisting}
+typedef bool int_predicate(int x);
+
+struct node *nodes_filter(struct node *n, int_predicate *p)
+    //@ requires nodes(n, _);
+    //@ ensures nodes(result, _);
+{
+    if (n == 0) {
+        return 0;
+    } else {
+        //@ open nodes(n, _);
+        bool keep = p(n->value);
+        if (keep) {
+            struct node *next = nodes_filter(n->next, p);
+            //@ open nodes(next, ?count);
+            //@ close nodes(next, count);
+            n->next = next;
+            //@ close nodes(n, count + 1);
+            return n;
+        } else {
+            struct node *next = n->next;
+            free(n);
+            struct node *result = nodes_filter(next, p);
+            return result;
+        }
+    }
+}
+
+void stack_filter(struct stack *stack, int_predicate *p)
+    //@ requires stack(stack, _);
+    //@ ensures stack(stack, _);
+{
+    //@ open stack(stack, _);
+    struct node *head = nodes_filter(stack->head, p);
+    //@ assert nodes(head, ?count);
+    stack->head = head;
+    //@ open nodes(head, count);
+    //@ close nodes(head, count);
+    //@ close stack(stack, count);
+}
+
+bool neq_20(int x)
+    //@ requires true;
+    //@ ensures true;
+{
+    return x != 20;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_push(s, 30);
+    stack_filter(s, neq_20);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+This program does not verify. VeriFast does not know what
+contract to use to verify the call of \lstinline!p! in function
+\lstinline!nodes_filter!. VeriFast requires that each function
+type has a contract:
+\begin{lstlisting}
+typedef bool int_predicate(int x);
+    //@ requires true;
+    //@ ensures true;
+\end{lstlisting}
+However, this is not sufficient. Even though \lstinline!p! is
+of type \lstinline!int_predicate *!, this does not guarantee
+that it points to a function that complies with the
+\lstinline!int_predicate! function type's signature and
+contract. Indeed, any integer can be cast to a pointer and any
+pointer can be cast to a function pointer. Therefore, VeriFast
+introduces a pure boolean function \lstinline!is_T! for each
+function type \lstinline!T! declared in the program. When
+verifying a call through a function pointer \lstinline!p! of
+type \lstinline!T *!, VeriFast checks that \lstinline!is_T(p)!
+is true. In order to generate an \lstinline!is_T(f)! fact for a
+given function \lstinline!f!, \lstinline!f!'s header must
+include a function type implementation clause:
+\begin{lstlisting}
+bool neq_20(int x) //@ : int_predicate
+    //@ requires true;
+    //@ ensures true;
+\end{lstlisting}
+This further causes VeriFast to check that the contract of
+\lstinline!neq_20! subsumes the contract of
+\lstinline!int_predicate!.
+
+Finally, we must pass the \lstinline!is_int_predicate! fact
+from the client to the call site:
+\begin{lstlisting}
+struct node *nodes_filter(struct node *n, int_predicate *p)
+    //@ requires nodes(n, _) &*& is_int_predicate(p) == true;
+    //@ ensures nodes(result, _);
+
+void stack_filter(struct stack *stack, int_predicate *p)
+    //@ requires stack(stack, _) &*& is_int_predicate(p) == true;
+    //@ ensures stack(stack, _);
+\end{lstlisting}
+Notice that we write \lstinline!is_int_predicate(p) == true!
+instead of \lstinline!is_int_predicate(p)!. VeriFast parses the
+latter form as a predicate assertion, and since there is no
+such predicate, rejects it.
+
+\begin{exercise}\label{exercise:stack9}
+Put all the pieces together.
+\end{exercise}
+
+The state of our \lstinline!stack_filter! function is
+unsatisfactory in two ways: firstly, the
+\lstinline!int_predicate! function cannot read any memory
+locations, since its precondition does not require any heap
+chunks; it follows that you cannot filter all elements that are
+greater than some user-provided value, for example. This will
+be solved using predicate families in
+Section~\ref{section:predicate-families}. Secondly, the
+implementation re-assigns each next pointer, even if only a few
+elements are removed. This will be solved using by-reference
+parameters in Section~\ref{section:byref-params}.
+
+\section{By-Reference Parameters}\label{section:byref-params}
+
+Here's an alternative implementation of the
+\lstinline!stack_filter! function from
+Section~\ref{section:function-pointers}. Instead of
+re-assigning each next pointer, it passes a pointer to the next
+pointer and only re-assigns it when it changes.
+\begin{lstlisting}
+void nodes_filter(struct node **n, int_predicate *p) {
+    if (*n != 0) {
+        bool keep = p((*n)->value);
+        if (keep) {
+            nodes_filter(&(*n)->next, p);
+        } else {
+            struct node *next = (*n)->next;
+            free(*n);
+            *n = next;
+            nodes_filter(n, p);
+        }
+    }
+}
+
+void stack_filter(struct stack *stack, int_predicate *p) {
+    nodes_filter(&stack->head, p);
+}
+\end{lstlisting}
+In this program, we are effectively passing the pointer to the
+current node to function \lstinline!nodes_filter! by reference.
+Inside function \lstinline!nodes_filter!, we dereference
+\lstinline!n! to obtain the pointer to the current node.
+VeriFast treats pointer dereferences in a way similar to field
+dereferences. However, instead of looking in the symbolic heap
+for a field chunk, it looks for a generic variable chunk; in
+this case, since the pointer being dereferenced points to a
+variable that holds a pointer, it looks for a
+\lstinline!pointer! chunk. Predicate \lstinline!pointer! is
+defined in \texttt{prelude.h} as follows:
+\begin{lstlisting}
+predicate pointer(void **pp; void *p);
+\end{lstlisting}
+(We will discuss the meaning of the semicolon later; for now,
+just read it like a comma.) Like in the case of a field chunk,
+the first argument is the address of the variable, and the
+second argument is the current value of the variable.
+
+It follows that the following is a valid contract for function
+\lstinline!nodes_filter!:
+\begin{lstlisting}
+void nodes_filter(struct node **n, int_predicate *p)
+    //@ requires pointer(n, ?node) &*& nodes(node, _) &*& is_int_predicate(p) == true;
+    //@ ensures pointer(n, ?node0) &*& nodes(node0, _);
+\end{lstlisting}
+
+In order to be able to call \lstinline!nodes_filter! from
+\lstinline!stack_filter!, we must produce a \lstinline!pointer!
+chunk. Specifically, we must transform the
+\lstinline!stack_head! chunk into a \lstinline!pointer! chunk.
+We do this simply by opening the \lstinline!stack_head! chunk.
+To turn the pointer chunk back into a \lstinline!stack_head!
+chunk, we simply close the \lstinline!stack_head! chunk again:
+\begin{lstlisting}
+void stack_filter(struct stack *stack, int_predicate *p)
+    //@ requires stack(stack, _) &*& is_int_predicate(p) == true;
+    //@ ensures stack(stack, _);
+{
+    //@ open stack(stack, _);
+    //@ open stack_head(stack, _);
+    nodes_filter(&stack->head, p);
+    //@ assert pointer(&stack->head, ?head) &*& nodes(head, ?count);
+    //@ close stack_head(stack, head);
+    //@ open nodes(head, count);
+    //@ close nodes(head, count);
+    //@ close stack(stack, count);
+}
+\end{lstlisting}
+Notice that, since we cannot use patterns in close statements,
+we need to bind the value of the head field to a variable
+\lstinline!head! before we can close the \lstinline!stack_head!
+chunk.
+
+\begin{exercise}\label{exercise:stack10}
+Verify function \lstinline!nodes_filter!.
+\end{exercise}
+
+Note: VeriFast currently supports the dereference
+(\lstinline!*!) operator only for pointers to pointers and
+pointers to integers. In the latter case, the following
+predicate is used, also defined in \texttt{prelude.h}:
+\begin{lstlisting}
+predicate integer(int *p; int v);
+\end{lstlisting}
+VeriFast does not yet support taking the address of a local
+variable.
+
+\section{Predicate families}\label{section:predicate-families}
+
+Let's go back to the \lstinline!stack_filter! function from
+Section~\ref{section:function-pointers}. Suppose we want to
+remove all occurrences of some user-provided value from the
+stack:
+\begin{lstlisting}
+typedef bool int_predicate(void *data, int x);
+
+struct node *nodes_filter(struct node *n, int_predicate *p, void *data)
+{
+    if (n == 0) {
+        return 0;
+    } else {
+        bool keep = p(data, n->value);
+        if (keep) {
+            struct node *next = nodes_filter(n->next, p, data);
+            n->next = next;
+            return n;
+        } else {
+            struct node *next = n->next;
+            free(n);
+            struct node *result = nodes_filter(next, p, data);
+            return result;
+        }
+    }
+}
+
+void stack_filter(struct stack *stack, int_predicate *p, void *data)
+{
+    struct node *head = nodes_filter(stack->head, p, data);
+    stack->head = head;
+}
+
+struct neq_a_data {
+    int a;
+};
+
+bool neq_a(struct neq_a_data *data, int x)
+{
+    bool result = x != data->a;
+    return result;
+}
+
+int read_int();
+
+int main()
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_push(s, 30);
+    int a = read_int();
+    struct neq_a_data *data = malloc(sizeof(struct neq_a_data));
+    if (data == 0) abort();
+    data->a = a;
+    stack_filter(s, neq_a, data);
+    free(data);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+How do we specify the stack module? Here's an attempt:
+\begin{lstlisting}
+//@ predicate int_predicate_data(void *data) = ??
+
+typedef bool int_predicate(void *data, int x);
+    //@ requires int_predicate_data(data);
+    //@ ensures int_predicate_data(data);
+
+struct node *nodes_filter(struct node *n, int_predicate *p, void *data)
+    //@ requires nodes(n, _) &*& is_int_predicate(p) == true &*& int_predicate_data(data);
+    //@ ensures nodes(result, _) &*& int_predicate_data(data);
+{ ... }
+
+void stack_filter(struct stack *stack, int_predicate *p, void *data)
+    //@ requires stack(stack, _) &*& is_int_predicate(p) == true &*& int_predicate_data(data);
+    //@ ensures stack(stack, _) &*& int_predicate_data(data);
+{ ... }
+\end{lstlisting}
+
+The problem is in the definition of predicate
+\lstinline!int_predicate_data!. There is no way for the stack
+module to predict what data structure the \lstinline!data!
+pointer points to. If we allow the client to choose the
+definition of the predicate, we can verify the client easily:
+\begin{lstlisting}
+//@ predicate int_predicate_data(void *data) = neq_a_data_a(data, _);
+
+bool neq_a(struct neq_a_data *data, int x) //@ : int_predicate
+    //@ requires int_predicate_data(data);
+    //@ ensures int_predicate_data(data);
+{
+    //@ open int_predicate_data(data);
+    bool result = x != data->a;
+    //@ close int_predicate_data(data);
+    return result;
+}
+
+int read_int();
+    //@ requires true;
+    //@ ensures true;
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_push(s, 30);
+    int a = read_int();
+    struct neq_a_data *data = malloc(sizeof(struct neq_a_data));
+    if (data == 0) abort();
+    data->a = a;
+    //@ close int_predicate_data(data);
+    stack_filter(s, neq_a, data);
+    //@ open int_predicate_data(data);
+    free(data);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+However, this clearly is not feasible. After all, if our stack
+module has more than one client, we will have multiple
+definitions for the same predicate. Specifically, we will have
+one definition of \lstinline!int_predicate_data! for each
+function of type \lstinline!int_predicate!. The problem would
+be solved if we could refer specifically to the definition of
+\lstinline!int_predicate_data! corresponding to a given
+function of type \lstinline!int_predicate!. This is exactly
+what \emph{predicate families} enable. A predicate family is
+like an ordinary predicate, except that you can have multiple
+definitions, provided that each definition is associated with a
+distinct \emph{index}. Predicate family indices must be
+function pointers.
+
+If we apply predicate families, we get the following
+specification for the stack module:
+\begin{lstlisting}
+//@ predicate_family int_predicate_data(void *p)(void *data);
+
+typedef bool int_predicate(void *data, int x);
+    //@ requires int_predicate_data(this)(data);
+    //@ ensures int_predicate_data(this)(data);
+
+struct node *nodes_filter(struct node *n, int_predicate *p, void *data)
+    //@ requires nodes(n, _) &*& is_int_predicate(p) == true &*& int_predicate_data(p)(data);
+    //@ ensures nodes(result, _) &*& int_predicate_data(p)(data);
+
+void stack_filter(struct stack *stack, int_predicate *p, void *data)
+    //@ requires stack(stack, _) &*& is_int_predicate(p) == true &*& int_predicate_data(p)(data);
+    //@ ensures stack(stack, _) &*& int_predicate_data(p)(data);
+\end{lstlisting}
+Notice that inside the contract of a function type, you can
+refer to the function pointer as \lstinline!this!.
+
+The client can be verified as follows:
+\begin{lstlisting}
+struct neq_a_data {
+    int a;
+};
+
+/*@
+predicate_family_instance int_predicate_data(neq_a)(void *data) =
+    neq_a_data_a(data, _);
+@*/
+
+bool neq_a(struct neq_a_data *data, int x) //@ : int_predicate
+    //@ requires int_predicate_data(neq_a)(data);
+    //@ ensures int_predicate_data(neq_a)(data);
+{
+    //@ open int_predicate_data(neq_a)(data);
+    bool result = x != data->a;
+    //@ close int_predicate_data(neq_a)(data);
+    return result;
+}
+
+int read_int();
+    //@ requires true;
+    //@ ensures true;
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_push(s, 30);
+    int a = read_int();
+    struct neq_a_data *data = malloc(sizeof(struct neq_a_data));
+    if (data == 0) abort();
+    data->a = a;
+    //@ close int_predicate_data(neq_a)(data);
+    stack_filter(s, neq_a, data);
+    //@ open int_predicate_data(neq_a)(data);
+    free(data);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
 \section{Solutions to Exercises}
 
 \subsection{Exercise \ref{exercise:account1}}
@@ -1933,6 +2360,183 @@ void stack_reverse(struct stack *stack)
     //@ open nodes(n, _);
     stack->head = m;
     //@ close stack(stack, reverse(values));
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack9}}\label{solution:stack9}
+
+\begin{lstlisting}
+#include "stdlib.h"
+
+struct node {
+    struct node *next;
+    int value;
+};
+
+struct stack {
+    struct node *head;
+};
+
+/*@
+
+predicate nodes(struct node *node, int count) =
+    node == 0 ? count == 0 : 0 < count &*& node->next |-> ?next &*& node->value |-> ?value &*& malloc_block_node(node) &*& nodes(next, count - 1);
+
+predicate stack(struct stack *stack, int count) =
+    stack->head |-> ?head &*& malloc_block_stack(stack) &*& 0 <= count &*& nodes(head, count);
+
+@*/
+
+struct stack *create_stack()
+    //@ requires true;
+    //@ ensures stack(result, 0);
+{
+    struct stack *stack = malloc(sizeof(struct stack));
+    if (stack == 0) { abort(); }
+    stack->head = 0;
+    //@ close nodes(0, 0);
+    //@ close stack(stack, 0);
+    return stack;
+}
+
+void stack_push(struct stack *stack, int value)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count + 1);
+{
+    //@ open stack(stack, count);
+    struct node *n = malloc(sizeof(struct node));
+    if (n == 0) { abort(); }
+    n->next = stack->head;
+    n->value = value;
+    stack->head = n;
+    //@ close nodes(n, count + 1);
+    //@ close stack(stack, count + 1);
+}
+
+int stack_pop(struct stack *stack)
+    //@ requires stack(stack, ?count) &*& 0 < count;
+    //@ ensures stack(stack, count - 1);
+{
+    //@ open stack(stack, count);
+    struct node *head = stack->head;
+    //@ open nodes(head, count);
+    int result = head->value;
+    stack->head = head->next;
+    free(head);
+    //@ close stack(stack, count - 1);
+    return result;
+}
+
+typedef bool int_predicate(int x);
+    //@ requires true;
+    //@ ensures true;
+
+struct node *nodes_filter(struct node *n, int_predicate *p)
+    //@ requires nodes(n, _) &*& is_int_predicate(p) == true;
+    //@ ensures nodes(result, _);
+{
+    if (n == 0) {
+        return 0;
+    } else {
+        //@ open nodes(n, _);
+        bool keep = p(n->value);
+        if (keep) {
+            struct node *next = nodes_filter(n->next, p);
+            //@ open nodes(next, ?count);
+            //@ close nodes(next, count);
+            n->next = next;
+            //@ close nodes(n, count + 1);
+            return n;
+        } else {
+            struct node *next = n->next;
+            free(n);
+            struct node *result = nodes_filter(next, p);
+            return result;
+        }
+    }
+}
+
+void stack_filter(struct stack *stack, int_predicate *p)
+    //@ requires stack(stack, _) &*& is_int_predicate(p) == true;
+    //@ ensures stack(stack, _);
+{
+    //@ open stack(stack, _);
+    struct node *head = nodes_filter(stack->head, p);
+    //@ assert nodes(head, ?count);
+    stack->head = head;
+    //@ open nodes(head, count);
+    //@ close nodes(head, count);
+    //@ close stack(stack, count);
+}
+
+void nodes_dispose(struct node *n)
+    //@ requires nodes(n, _);
+    //@ ensures true;
+{
+    //@ open nodes(n, _);
+    if (n != 0) {
+        nodes_dispose(n->next);
+        free(n);
+    }
+}
+
+void stack_dispose(struct stack *stack)
+    //@ requires stack(stack, _);
+    //@ ensures true;
+{
+    //@ open stack(stack, _);
+    nodes_dispose(stack->head);
+    free(stack);
+}
+
+bool neq_20(int x) //@ : int_predicate
+    //@ requires true;
+    //@ ensures true;
+{
+    return x != 20;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    stack_push(s, 10);
+    stack_push(s, 20);
+    stack_push(s, 30);
+    stack_filter(s, neq_20);
+    stack_dispose(s);
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Exercise
+\ref{exercise:stack10}}\label{solution:stack10}
+
+\begin{lstlisting}
+void nodes_filter(struct node **n, int_predicate *p)
+    //@ requires pointer(n, ?node) &*& nodes(node, _) &*& is_int_predicate(p) == true;
+    //@ ensures pointer(n, ?node0) &*& nodes(node0, _);
+{
+    if (*n != 0) {
+        //@ open nodes(node, _);
+        bool keep = p((*n)->value);
+        if (keep) {
+            //@ open node_next(node, _);
+            nodes_filter(&(*n)->next, p);
+            //@ assert pointer(&((struct node *)node)->next, ?next) &*& nodes(next, ?count);
+            //@ close node_next(node, next);
+            //@ open nodes(next, count);
+            //@ close nodes(next, count);
+            //@ close nodes(node, count + 1);
+        } else {
+            struct node *next = (*n)->next;
+            free(*n);
+            *n = next;
+            nodes_filter(n, p);
+        }
+    }
 }
 \end{lstlisting}
 

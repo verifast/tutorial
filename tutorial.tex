@@ -1284,7 +1284,7 @@ software interrupt if the overflow flag is set. An
 implementation that uses this instruction is likely to perform
 much better.
 
-\section{Function pointers}\label{section:function-pointers}
+\section{Function Pointers}\label{section:function-pointers}
 
 Let's write a function that takes a stack and removes those elements that do not satisfy a given predicate:
 \begin{lstlisting}
@@ -1506,7 +1506,7 @@ predicate integer(int *p; int v);
 VeriFast does not yet support taking the address of a local
 variable.
 
-\section{Predicate families}\label{section:predicate-families}
+\section{Predicate Families}\label{section:predicate-families}
 
 Let's go back to the \lstinline!stack_filter! function from
 Section~\ref{section:function-pointers}. Suppose we want to
@@ -1710,6 +1710,124 @@ int main()
     return 0;
 }
 \end{lstlisting}
+
+\section{Generics}\label{section:generics}
+
+Consider the solution to Exercise~\ref{exercise:stack8}, where
+we verified full functional correctness of a
+\lstinline!stack_reverse! function for a stack of integers. We
+used an \lstinline!ints! inductive datatype, fixpoint functions
+\lstinline!append! and \lstinline!reverse!, and lemmas
+\lstinline!append_nil! and \lstinline!append_assoc!. Suppose,
+now, that we need the same functionality for a stack of
+pointers. Clearly, since C does not support generics, we will
+need to copy-paste the C code and replace \lstinline!int! with
+\lstinline!void *! throughout. However, fortunately, VeriFast
+does support generics for inductive datatypes, fixpoint
+functions, lemmas, and predicates, so instead of copy-pasting
+all of these, we can parameterize them by the element type.
+Here are parameterized versions of \lstinline!ints!,
+\lstinline!append!, and \lstinline!append_nil!:
+\begin{lstlisting}
+inductive list<t> = nil | cons(t, list<t>);
+
+fixpoint list<t> append<t>(list<t> xs, list<t> ys) {
+    switch (xs) {
+        case nil: return ys;
+        case cons(x, xs0): return cons<t>(x, append<t>(xs0, ys));
+    }
+}
+
+lemma void append_nil<t>(list<t> xs)
+    requires true;
+    ensures append<t>(xs, nil<t>) == xs;
+{
+    switch (xs) {
+        case nil:
+        case cons(x, xs0):
+            append_nil<t>(xs0);
+    }
+}
+\end{lstlisting}
+As you can see, an inductive datatype definition, fixpoint
+function definition, or lemma definition accepts an optional
+\emph{type parameter list}, which is a list of \emph{type
+parameters} enclosed in angle brackets. Inside the definition,
+the type parameters can be used just like other types. Whenever
+a type-parameterized datatype, fixpoint, lemma, predicate, or
+constructor of a type-parameterized datatype, is mentioned, a
+\emph{type argument list} has to be supplied, which is a list
+of types enclosed in angle brackets.
+
+Here's what predicates \lstinline!nodes! and \lstinline!stack!
+and function \lstinline!stack_reverse! look like for stacks of
+pointers:
+\begin{lstlisting}
+predicate nodes(struct node *node, list<void *> values) =
+    node == 0 ?
+        values == nil<void *>
+    :
+        node->next |-> ?next &*& node->value |-> ?value &*& malloc_block_node(node) &*&
+        nodes(next, ?values0) &*& values == cons<void *>(value, values0);
+
+predicate stack(struct stack *stack, list<void *> values) =
+    stack->head |-> ?head &*& malloc_block_stack(stack) &*& nodes(head, values);
+
+void stack_reverse(struct stack *stack)
+    //@ requires stack(stack, ?values);
+    //@ ensures stack(stack, reverse<void *>(values));
+{
+    //@ open stack(stack, values);
+    struct node *n = stack->head;
+    struct node *m = 0;
+    //@ close nodes(m, nil<void *>);
+    //@ append_nil<void *>(reverse<void *>(values));
+    while (n != 0)
+        /*@
+        invariant
+            nodes(m, ?values1) &*& nodes(n, ?values2) &*&
+            reverse<void *>(values) == append<void *>(reverse<void *>(values2), values1);
+        @*/
+    {
+        //@ open nodes(n, values2);
+        struct node *next = n->next;
+        //@ assert nodes(next, ?values2tail) &*& n->value |-> ?value;
+        n->next = m;
+        m = n;
+        n = next;
+        //@ close nodes(m, cons<void *>(value, values1));
+        //@ append_assoc<void *>(reverse<void *>(values2tail), cons<void *>(value, nil<void *>), values1);
+    }
+    //@ open nodes(n, _);
+    stack->head = m;
+    //@ close stack(stack, reverse<void *>(values));
+}
+\end{lstlisting}
+
+Thanks to generics, we can now re-use the same datatypes,
+fixpoints, and lemmas for both stacks of ints and stacks of
+pointers. However, this approach does seem to introduce a lot
+of syntactic overhead, considering how we need to insert type
+argument lists everywhere. Fortunately, VeriFast performs
+\emph{type argument inference}. If VeriFast encounters an
+occurrence of a type-parameterized entity in an expression and
+no type argument list was specified, VeriFast will infer the
+type argument list. Since VeriFast's type system has no
+subtyping, a simple unification-based inference approach is
+sufficient. The result is that you almost never have to supply
+type argument lists in expressions explicitly. Specifically, in
+the example, all type argument lists in expressions can be
+omitted. Note: VeriFast does not infer type argument lists in
+types; that is, when you mention a type-parameterized inductive
+datatype, you must always supply the type arguments explicitly.
+
+Of course, the \lstinline!list! datatype is useful much more
+generally than just for stacks of integers and stacks of
+pointers. In fact, verification of any non-trivial program will
+require the use of lists. For this reason, VeriFast comes with
+a header file \verb|list.h| that includes the list datatype,
+all of the fixpoints and lemmas used in the example, and many
+more.
 
 \section{Solutions to Exercises}
 
@@ -2301,25 +2419,25 @@ fixpoint ints append(ints values1, ints values2) {
     }
 }
 
-lemma void append_nil_lemma(ints values)
+lemma void append_nil(ints values)
     requires true;
     ensures append(values, ints_nil) == values;
 {
     switch (values) {
         case ints_nil:
         case ints_cons(h, t):
-            append_nil_lemma(t);
+            append_nil(t);
     }
 }
 
-lemma void append_assoc_lemma(ints values1, ints values2, ints values3)
+lemma void append_assoc(ints values1, ints values2, ints values3)
     requires true;
     ensures append(append(values1, values2), values3) == append(values1, append(values2, values3));
 {
     switch (values1) {
         case ints_nil:
         case ints_cons(h, t):
-            append_assoc_lemma(t, values2, values3);
+            append_assoc(t, values2, values3);
     }
 }
 
@@ -2340,7 +2458,7 @@ void stack_reverse(struct stack *stack)
     struct node *n = stack->head;
     struct node *m = 0;
     //@ close nodes(m, ints_nil);
-    //@ append_nil_lemma(reverse(values));
+    //@ append_nil(reverse(values));
     while (n != 0)
         /*@
         invariant
@@ -2355,7 +2473,7 @@ void stack_reverse(struct stack *stack)
         m = n;
         n = next;
         //@ close nodes(m, ints_cons(value, values1));
-        //@ append_assoc_lemma(reverse(values2tail), ints_cons(value, ints_nil), values1);
+        //@ append_assoc(reverse(values2tail), ints_cons(value, ints_nil), values1);
     }
     //@ open nodes(n, _);
     stack->head = m;
@@ -2381,7 +2499,11 @@ struct stack {
 /*@
 
 predicate nodes(struct node *node, int count) =
-    node == 0 ? count == 0 : 0 < count &*& node->next |-> ?next &*& node->value |-> ?value &*& malloc_block_node(node) &*& nodes(next, count - 1);
+    node == 0 ?
+        count == 0
+    :
+        0 < count &*& node->next |-> ?next &*& node->value |-> ?value &*&
+        malloc_block_node(node) &*& nodes(next, count - 1);
 
 predicate stack(struct stack *stack, int count) =
     stack->head |-> ?head &*& malloc_block_stack(stack) &*& 0 <= count &*& nodes(head, count);

@@ -59,9 +59,7 @@ at
 \end{center}
 . You will find a command-line version of the tool
 (\texttt{verifast.exe}), and a version that presents a
-graphical user interface (\texttt{vfide.exe}). The example C
-programs used in this tutorial are in the \texttt{tutorial}
-directory.
+graphical user interface (\texttt{vfide.exe}).
 
 \section{Example: illegal\_access.c}
 
@@ -1256,8 +1254,8 @@ bounds of the type, but it does not assume that the original
 values are within the bounds of the type. These assumptions are
 not generated automatically for verification performance
 reasons. In order to generate these assumptions, we must insert
-\lstinline!assume_is_int! ghost commands into the code. The
-argument of an \lstinline!assume_is_int! command must be the
+\lstinline!produce_limits! ghost commands into the code. The
+argument of an \lstinline!produce_limits! command must be the
 name of a C local variable (i.e., not a local variable declared
 in an annotation). The following program verifies.
 \begin{lstlisting}
@@ -1265,8 +1263,8 @@ int int_add(int x, int y)
     //@ requires true;
     //@ ensures result == x + y;
 {
-    //@ assume_is_int(x);
-    //@ assume_is_int(y);
+    //@ produce_limits(x);
+    //@ produce_limits(y);
     if (0 <= x) {
         if (MAX_INT - x < y) abort();
     } else {

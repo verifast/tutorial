@@ -317,7 +317,7 @@ position where the value of the field belongs; this means that
 the value of the field when the function returns must be equal
 to the value of the parameter.
 
-\begin{exercise}\label{exercise:account1}
+\begin{exercise}\label{exercise:account}
 Now factor out the creation and the disposal of the
 $\mathsf{account}$ struct instance into separate functions as
 well. The creation function should initialize the balance to
@@ -415,7 +415,7 @@ obtained by evaluating the equality condition %
 \lstinline!result == theBalance! under the symbolic store shown
 in the upper Locals pane.
 
-\begin{exercise}\label{exercise:account2}
+\begin{exercise}\label{exercise:deposit}
 Add a function that deposits a given amount into an account.
 Verify the following \lstinline!main! function.
 \begin{lstlisting}
@@ -436,7 +436,7 @@ Note: VeriFast checks for arithmetic overflow. For now, disable
 this check in the \textbf{Verify} menu.
 \end{exercise}
 
-\begin{exercise}\label{exercise:account3}
+\begin{exercise}\label{exercise:limit}
 Add a field \lstinline!limit! to struct \lstinline!account!.
 The limit is specified at creation time. Further add a function
 to withdraw a given amount from an account. The function must
@@ -471,7 +471,7 @@ int main()
 \section{Predicates}
 
 We continue with the program obtained in
-Exercise~\ref{exercise:account3}. We observe that the contracts
+Exercise~\ref{exercise:limit}. We observe that the contracts
 are becoming rather long. Furthermore, if we consider the
 account ``class'' and the main function to be in different
 modules, then the internal implementation details of the
@@ -539,7 +539,7 @@ The function now verifies. However, the main function does not,
 since the call of \lstinline!account_deposit! expects an
 \lstinline!account_pred! heap chunk.
 
-\begin{exercise}\label{exercise:predicates}
+\begin{exercise}\label{exercise:pred}
 Rewrite the remaining contracts using the
 \lstinline!account_pred! predicate. Insert \lstinline!open! and
 \lstinline!close! statements as necessary.
@@ -657,7 +657,7 @@ get the assumptions \lstinline!head == 0! and %
 \lstinline!count == 0!, and on the second branch we get
 \lstinline$head != 0$ and \lstinline$0 < count$.
 
-\begin{exercise}\label{exercise:stack2}
+\begin{exercise}\label{exercise:dispose}
 Modify function \lstinline!stack_dispose! so that it works even
 if the stack still contains some elements. Use a recursive
 helper function.\footnote{Warning: VeriFast does not verify
@@ -668,7 +668,7 @@ infinite loops. That is still your own responsibility.}
 Notice that VeriFast performs a case split when verifying an
 \lstinline!if! statement.
 
-\begin{exercise}\label{exercise:stack4}
+\begin{exercise}\label{exercise:sum}
 Add a function \lstinline!stack_get_sum! that returns the sum
 of the values of the elements on the stack. Use a recursive
 helper function. The contract need not specify the return value
@@ -677,7 +677,7 @@ helper function. The contract need not specify the return value
 
 \section{Loops}
 
-In Exercise~\ref{exercise:stack2}, we implemented
+In Exercise~\ref{exercise:dispose}, we implemented
 \lstinline!stack_dispose! using a recursive function. However,
 this is not an optimal implementation. If our data structure
 contains very many elements, we may create too many activation
@@ -776,7 +776,7 @@ the same things happen as in the first branch, except that the
 loop body is not executed, and the assumption %
 \lstinline!(= n 0)! is added to the Assumptions pane.
 
-\begin{exercise}\label{exercise:stack3}
+\begin{exercise}\label{exercise:popn}
 Specify and implement function \lstinline!stack_popn!, which
 pops a given number of elements from the stack (and returns
 \lstinline!void!). You may call \lstinline!stack_pop!
@@ -834,14 +834,16 @@ sequence given the \emph{head} (the first element) and the
 ints_cons(1, ints_cons(2, ints_cons(3, ints_nil)))
 \end{lstlisting}
 
-\begin{exercise}\label{exercise:stack4}
+\begin{exercise}\label{exercise:values}
 Replace the \lstinline!count! parameter of the
 \lstinline!nodes! and \lstinline!stack! predicates with a
 \lstinline!values! parameter of type \lstinline!ints! and
 update the predicate bodies. Further update the functions
 \lstinline!create_stack!, \lstinline!stack_push!, and
-\lstinline!stack_dispose!.
+\lstinline!stack_dispose!. Don't worry about \lstinline!stack_pop! for now.
 \end{exercise}
+
+\section{Fixpoint Functions}
 
 How should we update the annotations for function
 \lstinline!stack_pop!? We need to refer to the tail of the
@@ -881,7 +883,7 @@ annotation. This means we can use the \lstinline!ints_head! and
 \lstinline!stack_pop! to the new predicate definitions, and to
 specify the return value.
 
-\begin{exercise}\label{exercise:stack4bis}
+\begin{exercise}\label{exercise:fixpoints}
 Do so.
 \end{exercise}
 
@@ -889,12 +891,12 @@ We have now specified full functional correctness of our stack
 implementation, and VeriFast can now verify the new main
 function.
 
-\begin{exercise}\label{exercise:stack5}
+\begin{exercise}\label{exercise:sum_full}
 Add a C function \lstinline!stack_get_sum! that returns the sum
 of the elements of a given stack. Implement it using a
 recursive helper function \lstinline!nodes_get_sum!. Specify
 the new C functions using a recursive fixpoint function
-\lstinline!ints_get_sum!. Remember to turn off arithmetic
+\lstinline!ints_sum!. Remember to turn off arithmetic
 overflow checking in the \textbf{Verify} menu. Verify the
 following main function:
 \end{exercise}
@@ -1029,9 +1031,11 @@ lemma void nodes_to_lseg_lemma(struct node *first)
 Notice that this lemma is admitted since it performs induction
 on heap size.
 
-\begin{exercise}\label{exercise:stack6}
+\begin{exercise}\label{exercise:lemma}
 We will need the inverse operation as well. Write a lemma
-function \lstinline!lseg_to_nodes_lemma!.
+function \lstinline!lseg_to_nodes_lemma! that takes an
+\lstinline!lseg! chunk that ends in 0 and transforms it into a
+\lstinline!nodes! chunk.
 \end{exercise}
 
 The \lstinline!stack_get_count! function now looks as follows:
@@ -1157,8 +1161,8 @@ int stack_get_count(struct stack *stack)
 \end{lstlisting}
 These now verify.
 
-\begin{exercise}\label{exercise:stack7}
-Verify the following function:
+\begin{exercise}\label{exercise:push_all}
+Verify the following function. You'll need an extra lemma.
 \end{exercise}
 \begin{lstlisting}
 void stack_push_all(struct stack *stack, struct stack *other)
@@ -1179,11 +1183,12 @@ void stack_push_all(struct stack *stack, struct stack *other)
 }
 \end{lstlisting}
 
-\begin{exercise}\label{exercise:stack8}
+\begin{exercise}\label{exercise:reverse}
 Implement, specify, and verify a function
 \lstinline!stack_reverse! that performs in-place reversal of a
 stack, i.e., without any memory allocation. Verify full
 functional correctness (see Section~\ref{section:datatypes}).
+You'll need to define additional fixpoints and lemmas.
 \end{exercise}
 
 \section{Arithmetic Overflow}
@@ -1255,7 +1260,7 @@ values are within the bounds of the type. These assumptions are
 not generated automatically for verification performance
 reasons. In order to generate these assumptions, we must insert
 \lstinline!produce_limits! ghost commands into the code. The
-argument of an \lstinline!produce_limits! command must be the
+argument of a \lstinline!produce_limits! command must be the
 name of a C local variable (i.e., not a local variable declared
 in an annotation). The following program verifies.
 \begin{lstlisting}
@@ -1394,7 +1399,7 @@ instead of \lstinline!is_int_predicate(p)!. VeriFast parses the
 latter form as a predicate assertion, and since there is no
 such predicate, rejects it.
 
-\begin{exercise}\label{exercise:stack9}
+\begin{exercise}\label{exercise:filter}
 Put all the pieces together.
 \end{exercise}
 
@@ -1490,7 +1495,7 @@ we need to bind the value of the head field to a variable
 \lstinline!head! before we can close the \lstinline!stack_head!
 chunk.
 
-\begin{exercise}\label{exercise:stack10}
+\begin{exercise}\label{exercise:byref}
 Verify function \lstinline!nodes_filter!.
 \end{exercise}
 
@@ -1709,9 +1714,22 @@ int main()
 }
 \end{lstlisting}
 
+\begin{exercise}\label{exercise:map}
+Add a function \lstinline!stack_map! that takes a function $f$
+that takes an int and returns an int. \lstinline!stack_map!
+replaces the value of each element of the stack with the result
+of applying $f$ to it.
+
+Write a client program that creates a stack containing the
+values 10, 20, 30; then reads a value from the user; and then
+adds this value to each element of the stack using
+\lstinline!stack_map!. Verify the memory safety of the
+resulting program.
+\end{exercise}
+
 \section{Generics}\label{section:generics}
 
-Consider the solution to Exercise~\ref{exercise:stack8}, where
+Consider the solution to Exercise~\ref{exercise:reverse}, where
 we verified full functional correctness of a
 \lstinline!stack_reverse! function for a stack of integers. We
 used an \lstinline!ints! inductive datatype, fixpoint functions
@@ -1825,11 +1843,16 @@ pointers. In fact, verification of any non-trivial program will
 require the use of lists. For this reason, VeriFast comes with
 a header file \verb|list.h| that includes the list datatype,
 all of the fixpoints and lemmas used in the example, and many
-more.
+more. This header file is implicitly included in each file that
+is verified by VeriFast, so you do not need to include it
+explicitly. Note: This also means that you cannot define your
+own versions of \lstinline!nil!, \lstinline!cons!, or other
+elements provided by \verb|list.h|, since this would result in
+a name clash.
 
 \section{Solutions to Exercises}
 
-\subsection{Exercise \ref{exercise:account1}}
+\subsection{Exercise \ref{exercise:account}: account.c}
 
 \begin{lstlisting}
 #include "stdlib.h"
@@ -1873,7 +1896,7 @@ int main()
 }
 \end{lstlisting}
 
-\subsection{Exercise \ref{exercise:account2}}
+\subsection{Exercise \ref{exercise:deposit}: deposit.c}
 
 \begin{lstlisting}
 void account_deposit(struct account *myAccount, int amount)
@@ -1884,7 +1907,7 @@ void account_deposit(struct account *myAccount, int amount)
 }
 \end{lstlisting}
 
-\subsection{Exercise \ref{exercise:account3}}
+\subsection{Exercise \ref{exercise:limit}: limit.c}
 
 \begin{lstlisting}
 #include "stdlib.h"
@@ -1938,7 +1961,7 @@ void account_dispose(struct account *myAccount)
 }
 \end{lstlisting}
 
-\subsection{Exercise \ref{exercise:predicates}}
+\subsection{Exercise \ref{exercise:pred}: pred.c}
 
 \begin{lstlisting}
 #include "stdlib.h"
@@ -2026,7 +2049,7 @@ int main()
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack}}\label{solution:stack}
+\ref{exercise:stack}: stack.c}\label{solution:stack}
 
 \begin{lstlisting}
 #include "stdlib.h"
@@ -2119,7 +2142,7 @@ int main()
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack2}}\label{solution:stack2}
+\ref{exercise:dispose}: dispose.c}\label{solution:dispose}
 
 \begin{lstlisting}
 void nodes_dispose(struct node *n)
@@ -2144,7 +2167,7 @@ void stack_dispose(struct stack *stack)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack4}}\label{solution:stack4}
+\ref{exercise:sum}: sum.c}\label{solution:sum}
 
 \begin{lstlisting}
 int nodes_get_sum(struct node *nodes)
@@ -2173,7 +2196,7 @@ int stack_get_sum(struct stack *stack)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack3}}\label{solution:stack3}
+\ref{exercise:popn}: popn.c}\label{solution:popn}
 
 \begin{lstlisting}
 void stack_popn(struct stack *stack, int n)
@@ -2191,7 +2214,7 @@ void stack_popn(struct stack *stack, int n)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack4}}\label{solution:stack4}
+\ref{exercise:values}: values.c}\label{solution:values}
 
 \begin{lstlisting}
 #include "stdlib.h"
@@ -2208,20 +2231,6 @@ struct stack {
 /*@
 
 inductive ints = ints_nil | ints_cons(int, ints);
-
-fixpoint int ints_head(ints values) {
-    switch (values) {
-        case ints_nil: return 0;
-        case ints_cons(value, values0): return value;
-    }
-}
-
-fixpoint ints ints_tail(ints values) {
-    switch (values) {
-        case ints_nil: return ints_nil;
-        case ints_cons(value, values0): return values0;
-    }
-}
 
 predicate nodes(struct node *node, ints values) =
     node == 0 ?
@@ -2272,7 +2281,7 @@ void stack_dispose(struct stack *stack)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack4bis}}\label{solution:stack4bis}
+\ref{exercise:fixpoints}: fixpoints.c}\label{solution:fixpoints}
 
 \begin{lstlisting}
 int stack_pop(struct stack *stack)
@@ -2291,7 +2300,7 @@ int stack_pop(struct stack *stack)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack5}}\label{solution:stack5}
+\ref{exercise:sum_full}: sum\_full.c}\label{solution:sum_full}
 
 \begin{lstlisting}
 /*@
@@ -2331,7 +2340,7 @@ int stack_get_sum(struct stack *stack)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack6}}\label{solution:stack6}
+\ref{exercise:lemma}: lemma.c}\label{solution:lemma}
 
 \begin{lstlisting}
 lemma void lseg_to_nodes_lemma(struct node *first)
@@ -2347,7 +2356,7 @@ lemma void lseg_to_nodes_lemma(struct node *first)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack7}}\label{solution:stack7}
+\ref{exercise:push_all}: push\_all.c}\label{solution:push_all}
 
 \begin{lstlisting}
 /*@
@@ -2405,7 +2414,7 @@ void stack_push_all(struct stack *stack, struct stack *other)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack8}}\label{solution:stack8}
+\ref{exercise:reverse}: reverse.c}\label{solution:reverse}
 
 \begin{lstlisting}
 /*@
@@ -2480,7 +2489,7 @@ void stack_reverse(struct stack *stack)
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack9}}\label{solution:stack9}
+\ref{exercise:filter}: filter.c}\label{solution:filter}
 
 \begin{lstlisting}
 #include "stdlib.h"
@@ -2632,7 +2641,7 @@ int main()
 \end{lstlisting}
 
 \subsection{Exercise
-\ref{exercise:stack10}}\label{solution:stack10}
+\ref{exercise:byref}: byref.c}\label{solution:byref}
 
 \begin{lstlisting}
 void nodes_filter(struct node **n, int_predicate *p)
@@ -2657,6 +2666,39 @@ void nodes_filter(struct node **n, int_predicate *p)
             nodes_filter(n, p);
         }
     }
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:map}:
+map.c}\label{solution:map}
+
+\begin{lstlisting}
+//@ predicate_family int_func_data(void *f)(void *data);
+
+typedef int int_func(void *data, int x);
+    //@ requires int_func_data(this)(data);
+    //@ ensures int_func_data(this)(data);
+
+void nodes_map(struct node *n, int_func *f, void *data)
+    //@ requires nodes(n, ?count) &*& is_int_func(f) == true &*& int_func_data(f)(data);
+    //@ ensures nodes(n, count) &*& is_int_func(f) == true &*& int_func_data(f)(data);
+{
+    //@ open nodes(n, _);
+    if (n != 0) {
+        int y = f(data, n->value);
+        n->value = y;
+        nodes_map(n->next, f, data);
+    }
+    //@ close nodes(n, count);
+}
+
+void stack_map(struct stack *stack, int_func *f, void *data)
+    //@ requires stack(stack, ?count) &*& is_int_func(f) == true &*& int_func_data(f)(data);
+    //@ ensures stack(stack, count) &*& is_int_func(f) == true &*& int_func_data(f)(data);
+{
+    //@ open stack(stack, _);
+    nodes_map(stack->head, f, data);
+    //@ close stack(stack, count);
 }
 \end{lstlisting}
 

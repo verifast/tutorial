@@ -1501,11 +1501,13 @@ Verify function \lstinline!nodes_filter!.
 \end{exercise}
 
 Note: VeriFast currently supports the dereference
-(\lstinline!*!) operator only for pointers to pointers and
-pointers to integers. In the latter case, the following
-predicate is used, also defined in \texttt{prelude.h}:
+(\lstinline!*!) operator only for pointers to pointers,
+pointers to integers, and pointers to characters.
+In the latter cases, the following
+predicates are used, also defined in \texttt{prelude.h}:
 \begin{lstlisting}
 predicate integer(int *p; int v);
+predicate character(char *p; char v);
 \end{lstlisting}
 VeriFast does not yet support taking the address of a local
 variable.
@@ -1850,6 +1852,185 @@ explicitly. Note: This also means that you cannot define your
 own versions of \lstinline!nil!, \lstinline!cons!, or other
 elements provided by \verb|list.h|, since this would result in
 a name clash.
+
+\section{Predicate Values}
+
+In the previous section, we obtained a stack of pointers. In
+this section, we will use this stack to keep track of a
+collection of objects.
+
+Let's try to verify the following program. It is a stack-based
+calculator for 2D vectors. It uses the stack from the previous
+section. The user can push a vector onto the stack, replace the
+top two vectors with their sum, and pop the top vector to print
+it.
+
+\begin{lstlisting}
+struct vector {
+    int x;
+    int y;
+};
+
+struct vector *create_vector(int x, int y)
+{
+    struct vector *result = malloc(sizeof(struct vector));
+    if (result == 0) abort();
+    result->x = x;
+    result->y = y;
+    return result;
+}
+
+int main()
+{
+    struct stack *s = create_stack();
+    while (true)
+    {
+        char c = input_char();
+        if (c == 'p') {
+            int x = input_int();
+            int y = input_int();
+            struct vector *v = create_vector(x, y);
+            stack_push(s, v);
+        } else if (c == '+') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v1 = stack_pop(s);
+            empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v2 = stack_pop(s);
+            struct vector *sum = create_vector(v1->x + v2->x, v1->y + v2->y);
+            free(v1);
+            free(v2);
+            stack_push(s, sum);
+        } else if (c == '=') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v = stack_pop(s);
+            output_int(v->x);
+            output_int(v->y);
+            free(v);
+        } else {
+            abort();
+        }
+    }
+}
+\end{lstlisting}
+
+The specification of \lstinline!create_vector! is easy:
+
+\begin{lstlisting}
+//@ predicate vector(struct vector *v) = v->x |-> _ &*& v->y |-> _ &*& malloc_block_vector(v);
+
+struct vector *create_vector(int x, int y)
+    //@ requires true;
+    //@ ensures vector(result);
+\end{lstlisting}
+
+The tricky part is the loop invariant for the loop in
+\lstinline!main!. The loop invariant should state that we have
+a stack at \lstinline!s!, and furthermore, that for each
+element of \lstinline!s!, we have a vector. We can express the
+first part using the assertion \lstinline!stack(s, ?values)!,
+and we can easily write a recursive predicate to express the
+second part:
+
+\begin{lstlisting}
+predicate vectors(list<struct vector *> vs) =
+    switch (vs) {
+        case nil: return true;
+        case cons(v, vs0): return vector(v) &*& vectors(vs0);
+    };
+\end{lstlisting}
+
+This would work fine. However, it is unfortunate that we have
+to define a new predicate whenever we wish to express that we
+have a given predicate for each element of a list. To address
+this, VeriFast supports \emph{predicate values}. That is, you
+can pass a predicate as an argument to another predicate. This
+allows us to generalize the above \lstinline!vectors! predicate
+as follows:
+
+\begin{lstlisting}
+predicate foreach(list<void *> vs, predicate(void *) p) =
+    switch (vs) {
+        case nil: return true;
+        case cons(v, vs0): return p(v) &*& foreach(vs0, p);
+    };
+\end{lstlisting}
+
+Using generics, we can even generalize this predicate further,
+to work for lists of arbitrary values:
+
+\begin{lstlisting}
+predicate foreach<t>(list<t> vs, predicate(t) p) =
+    switch (vs) {
+        case nil: return true;
+        case cons(v, vs0): return p(v) &*& foreach(vs0, p);
+    };
+\end{lstlisting}
+
+Note that type argument inference allows us to omit the type
+argument for the recursive \lstinline!foreach! call.
+
+This predicate is so generally useful that we included it in
+\texttt{list.h}; as a result, it is automatically available in
+each file and you do not need to define it yourself.
+
+\begin{exercise}\label{exercise:foreach}
+Verify the program using \lstinline!foreach!.
+\end{exercise}
+
+%\section{Character Arrays}
+%
+%Let's verify a program that reads a line of text from standard
+%input, converts it to uppercase, and then writes it back to
+%standard output:
+%\begin{lstlisting}
+%void *malloc(int size);
+%void free(void *block);
+%
+%int getchar();
+%void putchar(int c);
+%
+%void toUpper(char *buffer, int count) {
+%    int i = 0;
+%    while (i < count) {
+%        char c = *(buffer + i);
+%        if ('a' <= c && c <= 'z')
+%            *(buffer + i) = c + 'A' - 'a';
+%        i++;
+%    }
+%}
+%
+%void putchars(char *buffer, int count) {
+%    int i = 0;
+%    while (i < count) {
+%        putchar(*(buffer + i));
+%        i++;
+%    }
+%}
+%
+%int main() {
+%    int bufsize = 100;
+%    char *buffer = malloc(bufsize);
+%    bool done = false;
+%    int i = 0;
+%    while (!done) {
+%        int c = getchar();
+%        if (c < 0 || c == '\n')
+%            done = true;
+%        else {
+%            *(buffer + i) = (char)c;
+%            i++;
+%            if (i == bufsize) done = true;
+%        }
+%    }
+%    toUpper(buffer, i);
+%    putchars(buffer, i);
+%    free(buffer);
+%    return 0;
+%}
+%\end{lstlisting}
 
 \section{Solutions to Exercises}
 
@@ -2700,6 +2881,89 @@ void stack_map(struct stack *stack, int_func *f, void *data)
     //@ open stack(stack, _);
     nodes_map(stack->head, f, data);
     //@ close stack(stack, count);
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:foreach}:
+foreach.c}\label{solution:foreach}
+
+\begin{lstlisting}
+char input_char();
+    //@ requires true;
+    //@ ensures true;
+
+int input_int();
+    //@ requires true;
+    //@ ensures true;
+
+void output_int(int x);
+    //@ requires true;
+    //@ ensures true;
+
+struct vector {
+    int x;
+    int y;
+};
+
+//@ predicate vector(struct vector *v) = v->x |-> _ &*& v->y |-> _ &*& malloc_block_vector(v);
+
+struct vector *create_vector(int x, int y)
+    //@ requires true;
+    //@ ensures vector(result);
+{
+    struct vector *result = malloc(sizeof(struct vector));
+    if (result == 0) abort();
+    result->x = x;
+    result->y = y;
+    //@ close vector(result);
+    return result;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct stack *s = create_stack();
+    //@ close foreach(nil, vector);
+    while (true)
+        //@ invariant stack(s, ?values) &*& foreach(values, vector);
+    {
+        char c = input_char();
+        if (c == 'p') {
+            int x = input_int();
+            int y = input_int();
+            struct vector *v = create_vector(x, y);
+            stack_push(s, v);
+            //@ close foreach(cons(v, values), vector);
+        } else if (c == '+') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v1 = stack_pop(s);
+            //@ open foreach(values, vector);
+            //@ open vector(head(values));
+            empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v2 = stack_pop(s);
+            //@ open foreach(tail(values), vector);
+            //@ open vector(head(tail(values)));
+            struct vector *sum = create_vector(v1->x + v2->x, v1->y + v2->y);
+            free(v1);
+            free(v2);
+            stack_push(s, sum);
+            //@ close foreach(cons(sum, tail(tail(values))), vector);
+        } else if (c == '=') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v = stack_pop(s);
+            //@ open foreach(values, vector);
+            //@ open vector(head(values));
+            output_int(v->x);
+            output_int(v->y);
+            free(v);
+        } else {
+            abort();
+        }
+    }
 }
 \end{lstlisting}
 

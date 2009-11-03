@@ -1980,6 +1980,101 @@ each file and you do not need to define it yourself.
 Verify the program using \lstinline!foreach!.
 \end{exercise}
 
+\section{Predicate Constructors}\label{section:predctors}
+
+Let's add a twist to the program of the previous section:
+\begin{lstlisting}
+struct vector *create_vector(int limit, int x, int y)
+{
+    if (x * x + y * y > limit * limit) abort();
+    struct vector *result = malloc(sizeof(struct vector));
+    if (result == 0) abort();
+    result->x = x;
+    result->y = y;
+    return result;
+}
+
+int main()
+{
+    int limit = input_int();
+    struct stack *s = create_stack();
+    while (true)
+    {
+        char c = input_char();
+        if (c == 'p') {
+            int x = input_int();
+            int y = input_int();
+            struct vector *v = create_vector(limit, x, y);
+            stack_push(s, v);
+        } else if (c == '+') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v1 = stack_pop(s);
+            empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v2 = stack_pop(s);
+            struct vector *sum = create_vector(limit, v1->x + v2->x, v1->y + v2->y);
+            free(v1);
+            free(v2);
+            stack_push(s, sum);
+        } else if (c == '=') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v = stack_pop(s);
+            int x = v->x;
+            int y = v->y;
+            free(v);
+            assert(x * x + y * y <= limit * limit);
+            output_int(x);
+            output_int(y);
+        } else {
+            abort();
+        }
+    }
+}
+\end{lstlisting}
+The program now starts by asking the user for a number that
+will serve as a limit on the size of the vectors. When creating
+a vector, the program checks that its size does not exceed the
+limit; otherwise it aborts. When printing a vector, the program
+asserts that the vector satisfies the size limit.
+
+How do we verify this assert statement?
+
+We will need to extend the \lstinline!vector! predicate to
+include the information that the vector's size is within the
+limit. However, the limit is a local variable and is not in
+scope in the predicate definition. So we need to pass it as an
+additional argument. But then we can no longer use the
+\lstinline!foreach! predicate, since it expects a predicate
+that takes just one parameter. To address this, VeriFies
+supports \emph{partially applied predicates}, in the form of
+\emph{predicate constructors}. To verify the example program,
+we can define a predicate constructor \lstinline!vector! as
+follows:
+\begin{lstlisting}
+/*@
+predicate_ctor vector(int limit)(struct vector *v) =
+    v->x |-> ?x &*& v->y |-> ?y &*& malloc_block_vector(v) &*& x * x + y * y <= limit * limit;
+@*/
+\end{lstlisting}
+We can express that for each element of a list
+\lstinline!values! we have a vector that satisfies limit
+\lstinline!limit! as follows:
+\begin{lstlisting}
+foreach(values, vector(limit))
+\end{lstlisting}
+That is, wherever we can use a predicate name, we can also use
+a predicate constructor applied to an argument list. We can do
+so in open statements, in close statements, and in assertions.
+
+Note: VeriFast currently does not support patterns in predicate
+constructor argument positions.
+
+\begin{exercise}\label{exercise:predctors}
+Verify the program.
+\end{exercise}
+
 %\section{Character Arrays}
 %
 %Let's verify a program that reads a line of text from standard
@@ -2960,6 +3055,85 @@ int main()
             output_int(v->x);
             output_int(v->y);
             free(v);
+        } else {
+            abort();
+        }
+    }
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{section:predctors}:
+predctors.c}\label{solution:predctors}
+
+\begin{lstlisting}
+struct vector {
+    int x;
+    int y;
+};
+
+/*@
+predicate_ctor vector(int limit)(struct vector *v) =
+    v->x |-> ?x &*& v->y |-> ?y &*& malloc_block_vector(v) &*& x * x + y * y <= limit * limit;
+@*/
+
+struct vector *create_vector(int limit, int x, int y)
+    //@ requires true;
+    //@ ensures vector(limit)(result);
+{
+    if (x * x + y * y > limit * limit) abort();
+    struct vector *result = malloc(sizeof(struct vector));
+    if (result == 0) abort();
+    result->x = x;
+    result->y = y;
+    //@ close vector(limit)(result);
+    return result;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    int limit = input_int();
+    struct stack *s = create_stack();
+    //@ close foreach(nil, vector(limit));
+    while (true)
+        //@ invariant stack(s, ?values) &*& foreach(values, vector(limit));
+    {
+        char c = input_char();
+        if (c == 'p') {
+            int x = input_int();
+            int y = input_int();
+            struct vector *v = create_vector(limit, x, y);
+            stack_push(s, v);
+            //@ close foreach(cons(v, values), vector(limit));
+        } else if (c == '+') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v1 = stack_pop(s);
+            //@ open foreach(values, vector(limit));
+            //@ open vector(limit)(head(values));
+            empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v2 = stack_pop(s);
+            //@ open foreach(tail(values), vector(limit));
+            //@ open vector(limit)(head(tail(values)));
+            struct vector *sum = create_vector(limit, v1->x + v2->x, v1->y + v2->y);
+            free(v1);
+            free(v2);
+            stack_push(s, sum);
+            //@ close foreach(cons(sum, tail(tail(values))), vector(limit));
+        } else if (c == '=') {
+            bool empty = stack_is_empty(s);
+            if (empty) abort();
+            struct vector *v = stack_pop(s);
+            //@ open foreach(values, vector(limit));
+            //@ open vector(limit)(head(values));
+            int x = v->x;
+            int y = v->y;
+            free(v);
+            assert(x * x + y * y <= limit * limit);
+            output_int(x);
+            output_int(y);
         } else {
             abort();
         }

@@ -2296,6 +2296,191 @@ Verify the memory safety of the program. Don't worry about memory deallocation;
 simply leak chunks that you no longer need.
 \end{exercise}
 
+\section{Fractional Permissions}\label{section:fractions}
+
+Suppose, now, that we want to adapt the program of the previous
+section as follows: instead of computing just the sum of the
+faculties, we want to compute both the sum of the faculties and
+the product of the faculties. Since our machine has two cores,
+we want to have two threads: one that computes the sum of the
+faculties of the values of the nodes of the tree, and one that
+computes the product of the faculties of the values of the
+nodes of the tree.
+
+To achieve this, first we generalize our
+\lstinline!tree_compute_sum_facs! function to a
+\lstinline!tree_fold! function that takes the function that it
+should apply to combine the node values as an argument:
+
+\begin{lstlisting}
+typedef int fold_function(int acc, int x);
+
+int tree_fold(struct tree *tree, fold_function *f, int acc)
+{
+    if (tree == 0) {
+        return acc;
+    } else {
+        acc = tree_fold(tree->left, f, acc);
+        acc = tree_fold(tree->right, f, acc);
+        acc = f(acc, tree->value);
+        return acc;
+    }
+}
+\end{lstlisting}
+
+If the elements of the tree $t$ in postfix order are $e_1, e_2,
+e_3, e_4$, then \lstinline!tree_fold!$(t, f, a)$ returns
+$$f(f(f(f(a, e_1), e_2), e_3), e_4)$$
+
+Likewise, we generalize our summator thread to a folder thread:
+
+\begin{lstlisting}
+struct fold_data {
+    struct thread *thread;
+    struct tree *tree;
+    fold_function *f;
+    int acc;
+};
+
+void folder(struct fold_data *data)
+{
+    int acc = tree_fold(data->tree, data->f, data->acc);
+    data->acc = acc;
+}
+
+struct fold_data *start_fold_thread(struct tree *tree, fold_function *f, int acc)
+{
+    struct fold_data *data = malloc(sizeof(struct fold_data));
+    struct thread *t = 0;
+    if (data == 0) abort();
+    data->tree = tree;
+    data->f = f;
+    data->acc = acc;
+    t = thread_start(folder, data);
+    data->thread = t;
+    return data;
+}
+
+int join_fold_thread(struct fold_data *data)
+{
+    thread_join(data->thread);
+    return data->acc;
+}
+\end{lstlisting}
+
+We can re-implement the program of the previous section using folder threads as follows:
+\begin{lstlisting}
+int sum_function(int acc, int x)
+{
+    int f = fac(x);
+    return acc + f;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct tree *tree = make_tree(22);
+    //@ open tree(tree, _);
+    struct fold_data *leftData = start_fold_thread(tree->left, sum_function, 0);
+    struct fold_data *rightData = start_fold_thread(tree->right, sum_function, 0);
+    int sumLeft = join_fold_thread(leftData);
+    int sumRight = join_fold_thread(rightData);
+    int f = fac(tree->value);
+    //@ leak tree->left |-> _ &*& tree->right |-> _ &*& tree->value |-> _ &*& malloc_block_tree(tree);
+    return sumLeft + sumRight + f;
+}
+\end{lstlisting}
+
+\begin{exercise}\label{exercise:fractions0}
+Verify the memory safety of this program.
+\end{exercise}
+
+It is now easy to write the program that computes the sums in
+one thread and the products in another, and returns the
+difference between the product and the sum:
+\begin{lstlisting}
+int sum_function(int acc, int x)
+{
+    int f = fac(x);
+    return acc + f;
+}
+
+int product_function(int acc, int x)
+{
+    int f = fac(x);
+    return acc * f;
+}
+
+int main()
+{
+    struct tree *tree = make_tree(21);
+    struct fold_data *sumData = start_fold_thread(tree, sum_function, 0);
+    struct fold_data *productData = start_fold_thread(tree, product_function, 1);
+    int sum = join_fold_thread(sumData);
+    int product = join_fold_thread(productData);
+    return product - sum;
+}
+\end{lstlisting}
+
+However, this program cannot be verified using the techniques
+that we have seen. The first \lstinline!start_fold_!\-\lstinline!thread! call
+consumes the \lstinline!tree! chunk, and therefore VeriFast
+will complain that the second call's precondition is not
+satisfied. In the system, as explained, only one thread may own
+a particular chunk of memory at any one time. Therefore, if the
+sum thread owns the tree, the product thread cannot access it
+simultaneously. However, this is in fact safe, so long as both
+threads only read and do not modify the tree.
+
+VeriFast supports the read-only sharing of chunks of memory
+using \emph{fractional permissions}. Each chunk in the VeriFast
+symbolic heap has a \emph{coefficient}, which is a real number
+between zero, exclusive, and one, inclusive. The default
+coefficient is 1 and is not shown. If a chunk's coefficient is
+not 1, it is shown to the left of the chunk enclosed in square
+brackets. A chunk with coefficient 1 represents a \emph{full
+permission}, that is, a \emph{read-write permission}. A chunk
+with a coefficient less than 1 represents a \emph{fractional
+permission}, that is, a \emph{read-only permission}.
+
+Since the \lstinline!tree_fold! function does not modify the
+tree, it requires only a fraction of the \lstinline!tree!
+chunk:
+\begin{lstlisting}
+int tree_fold(struct tree *tree, fold_function *f, int acc)
+    //@ requires [?frac]tree(tree, ?depth) &*& is_fold_function(f) == true;
+    //@ ensures [frac]tree(tree, depth);
+{
+    if (tree == 0) {
+        return acc;
+    } else {
+        //@ open [frac]tree(tree, depth);
+        acc = tree_fold(tree->left, f, acc);
+        acc = tree_fold(tree->right, f, acc);
+        acc = f(acc, tree->value);
+        return acc;
+        //@ close [frac]tree(tree, depth);
+    }
+}
+\end{lstlisting}
+Notice that we use a pattern in the coefficient position, so
+that the function may be applied to an arbitrarily small
+fraction of the \lstinline!tree! chunk. Notice also that we
+mention the fraction in the \lstinline!open! and
+\lstinline!close! statements. This is not necessary for the
+\lstinline!open! statement, since it will by default open
+whatever fraction is present in the symbolic heap, but it is
+necessary for the \lstinline!close! statement, since it will by
+default attempt to close a chunk with coefficient 1.
+
+\begin{exercise}\label{exercise:fractions}
+Verify the memory safety of the program. Adapt function
+\lstinline!start_fold_thread! so that it requires only a
+\lstinline!1/2! fraction of the tree chunk. Note: decimal
+notation is not supported; use fractional notation instead.
+\end{exercise}
+
 %\section{Character Arrays}
 %
 %Let's verify a program that reads a line of text from standard
@@ -3283,7 +3468,7 @@ int main()
 }
 \end{lstlisting}
 
-\subsection{Exercise \ref{section:predctors}:
+\subsection{Exercise \ref{exercise:predctors}:
 predctors.c}\label{solution:predctors}
 
 \begin{lstlisting}
@@ -3516,6 +3701,171 @@ int main()
     int f = fac(tree->value);
     //@ leak tree->left |-> _ &*& tree->right |-> _ &*& tree->value |-> _ &*& malloc_block_tree(tree);
     return sumLeft + sumRight + f;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:fractions0}: fractions0.c}\label{solution:fractions0}
+
+\begin{lstlisting}
+typedef int fold_function(int acc, int x);
+    //@ requires true;
+    //@ ensures true;
+
+int tree_fold(struct tree *tree, fold_function *f, int acc)
+    //@ requires tree(tree, ?depth) &*& is_fold_function(f) == true;
+    //@ ensures tree(tree, depth);
+{
+    if (tree == 0) {
+        return acc;
+    } else {
+        //@ open tree(tree, depth);
+        acc = tree_fold(tree->left, f, acc);
+        acc = tree_fold(tree->right, f, acc);
+        acc = f(acc, tree->value);
+        return acc;
+        //@ close tree(tree, depth);
+    }
+}
+
+struct fold_data {
+    struct thread *thread;
+    struct tree *tree;
+    fold_function *f;
+    int acc;
+};
+
+/*@
+
+predicate_family_instance thread_run_pre(folder)(struct fold_data *data, any info) =
+    data->tree |-> ?tree &*& tree(tree, _) &*&
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+predicate_family_instance thread_run_post(folder)(struct fold_data *data, any info) =
+    data->tree |-> ?tree &*& tree(tree, _) &*&
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+
+@*/
+
+void folder(struct fold_data *data) //@ : thread_run
+    //@ requires thread_run_pre(folder)(data, ?info);
+    //@ ensures thread_run_post(folder)(data, info);
+{
+    //@ open thread_run_pre(folder)(data, info);
+    int acc = tree_fold(data->tree, data->f, data->acc);
+    data->acc = acc;
+    //@ close thread_run_post(folder)(data, info);
+}
+
+struct fold_data *start_fold_thread(struct tree *tree, fold_function *f, int acc)
+    //@ requires tree(tree, _) &*& is_fold_function(f) == true;
+    //@ ensures result->thread |-> ?t &*& thread(t, folder, result, _);
+{
+    struct fold_data *data = malloc(sizeof(struct fold_data));
+    struct thread *t = 0;
+    if (data == 0) abort();
+    //@ leak malloc_block_fold_data(data);
+    data->tree = tree;
+    data->f = f;
+    data->acc = acc;
+    //@ close thread_run_pre(folder)(data, unit);
+    t = thread_start(folder, data);
+    data->thread = t;
+    return data;
+}
+
+int join_fold_thread(struct fold_data *data)
+    //@ requires data->thread |-> ?t &*& thread(t, folder, data, _);
+    //@ ensures true;
+{
+    thread_join(data->thread);
+    //@ open thread_run_post(folder)(data, _);
+    return data->acc;
+    //@ leak data->tree |-> ?tree &*& [_]tree(tree, _);
+    //@ leak data->f |-> _ &*& data->acc |-> _ &*& data->thread |-> _;
+}
+
+int sum_function(int acc, int x) //@ : fold_function
+    //@ requires true;
+    //@ ensures true;
+{
+    int f = fac(x);
+    return acc + f;
+}
+
+int product_function(int acc, int x) //@ : fold_function
+    //@ requires true;
+    //@ ensures true;
+{
+    int f = fac(x);
+    return acc * f;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct tree *tree = make_tree(22);
+    //@ open tree(tree, _);
+    struct fold_data *leftData = start_fold_thread(tree->left, sum_function, 0);
+    struct fold_data *rightData = start_fold_thread(tree->right, sum_function, 0);
+    int sumLeft = join_fold_thread(leftData);
+    int sumRight = join_fold_thread(rightData);
+    int f = fac(tree->value);
+    //@ leak tree->left |-> _ &*& tree->right |-> _ &*& tree->value |-> _ &*& malloc_block_tree(tree);
+    return sumLeft + sumRight + f;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:fractions}:
+fractions.c}\label{solution:fractions}
+
+\begin{lstlisting}
+/*@
+
+predicate_family_instance thread_run_pre(folder)(struct fold_data *data, any info) =
+    data->tree |-> ?tree &*& [1/2]tree(tree, _) &*&
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+predicate_family_instance thread_run_post(folder)(struct fold_data *data, any info) =
+    data->tree |-> ?tree &*& [1/2]tree(tree, _) &*&
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+
+@*/
+
+void folder(struct fold_data *data) //@ : thread_run
+    //@ requires thread_run_pre(folder)(data, ?info);
+    //@ ensures thread_run_post(folder)(data, info);
+{
+    //@ open thread_run_pre(folder)(data, info);
+    int acc = tree_fold(data->tree, data->f, data->acc);
+    data->acc = acc;
+    //@ close thread_run_post(folder)(data, info);
+}
+
+struct fold_data *start_fold_thread(struct tree *tree, fold_function *f, int acc)
+    //@ requires [1/2]tree(tree, _) &*& is_fold_function(f) == true;
+    //@ ensures result->thread |-> ?t &*& thread(t, folder, result, _);
+{
+    struct fold_data *data = malloc(sizeof(struct fold_data));
+    struct thread *t = 0;
+    if (data == 0) abort();
+    //@ leak malloc_block_fold_data(data);
+    data->tree = tree;
+    data->f = f;
+    data->acc = acc;
+    //@ close thread_run_pre(folder)(data, unit);
+    t = thread_start(folder, data);
+    data->thread = t;
+    return data;
+}
+
+int join_fold_thread(struct fold_data *data)
+    //@ requires data->thread |-> ?t &*& thread(t, folder, data, _);
+    //@ ensures true;
+{
+    thread_join(data->thread);
+    //@ open thread_run_post(folder)(data, _);
+    return data->acc;
+    //@ leak data->tree |-> ?tree &*& [_]tree(tree, _);
+    //@ leak data->f |-> _ &*& data->acc |-> _ &*& data->thread |-> _;
 }
 \end{lstlisting}
 

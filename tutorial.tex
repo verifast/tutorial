@@ -1853,7 +1853,7 @@ own versions of \lstinline!nil!, \lstinline!cons!, or other
 elements provided by \verb|list.h|, since this would result in
 a name clash.
 
-\section{Predicate Values}
+\section{Predicate Values}\label{section:predvals}
 
 In the previous section, we obtained a stack of pointers. In
 this section, we will use this stack to keep track of a
@@ -2479,6 +2479,216 @@ Verify the memory safety of the program. Adapt function
 \lstinline!start_fold_thread! so that it requires only a
 \lstinline!1/2! fraction of the tree chunk. Note: decimal
 notation is not supported; use fractional notation instead.
+\end{exercise}
+
+\section{Mutexes}\label{section:mutexes}
+
+Suppose we want to write a program that monitors two sensors
+and that prints the total number of pulses detected by both
+sensors, once every second. We can wait for a pulse from a
+given sensor using the API function \lstinline!wait_for_pulse!.
+Since pulses come in at both sensors simultaneously, we need to
+wait for pulses from each sensor in a separate thread. Whenever
+a pulse comes in at a sensor, the corresponding thread
+increments a counter that is shared between the threads. The
+main thread prints the value of the counter once every second.
+
+When multiple threads access the same variable concurrently,
+such as the counter in this example, then they need to
+synchronize their accesses; otherwise, two concurrent accesses
+may interfere, causing the result to be different from the
+result that would be obtained if the accesses were performed
+one after the other. Most programming platforms provide various
+synchronization constructs to synchronize threads in various
+ways.
+
+Perhaps the most common synchronization construct is the mutual
+exclusion lock, also known as a lock or a mutex. At any point,
+a mutex is in one of two states: either it is free, or it is
+held by some thread. A mutex can never be held by more than one
+thread. Mutexes provide two operations: acquire and release.
+When a thread attempts to acquire a mutex, there are two cases.
+\begin{itemize}
+\item if the mutex is free, the attempt succeeds and the
+    thread holds the mutex until it releases it.
+\item if the mutex is held by some other thread, the thread
+    that performed the attempt blocks until the mutex is
+    free.
+\item if the mutex is already held by the thread that
+    attempts to acquire it, then the result depends on
+    whether the mutex is re-entrant or non-re-entrant. If
+    the mutex is re-entrant, the attempt succeeds and the
+    mutex still holds the lock. If the mutex is
+    non-re-entrant, the attempt fails. This either means
+    that the thread blocks forever, or that an error occurs
+    and the program is terminated.
+\end{itemize}
+
+The C language does not itself offer any synchronization
+constructs; rather, the operating system does. For example, the
+Windows API offers a mutex construct called critical sections,
+and the Linux API offers a mutex construct called mutexes. To
+enable a uniform interface across all platforms, VeriFast
+includes a module \texttt{threading.c} that offers two
+synchronization constructs: mutexes and locks. The only
+difference between the two is that mutexes are non-re-entrant
+and locks are re-entrant. Since mutexes are easier to use, we
+will use those in this example.
+
+Here's the source code of the example program:
+\begin{lstlisting}
+#include "stdlib.h"
+#include "threading.h"
+
+void wait_for_pulse(int source);
+void sleep(int millis);
+void print_int(int n);
+
+struct counter {
+    int count;
+    struct mutex *mutex;
+};
+
+struct count_pulses_data {
+    struct counter *counter;
+    int source;
+};
+
+struct count_pulses_data *create_count_pulses_data(struct counter *counter, int source) {
+    struct count_pulses_data *data = malloc(sizeof(struct count_pulses_data));
+    if (data == 0) abort();
+    data->counter = counter;
+    data->source = source;
+    return data;
+}
+
+void count_pulses(struct count_pulses_data *data) {
+    struct counter *counter = data->counter;
+    int source = data->source;
+
+    struct mutex *mutex = counter->mutex;
+
+    while (true) {
+        wait_for_pulse(source);
+        mutex_acquire(mutex);
+        counter->count++;
+        mutex_release(mutex);
+    }
+}
+
+int main() {
+    struct counter *counter = malloc(sizeof(struct counter));
+    if (counter == 0) abort();
+    counter->count = 0;
+    struct mutex *mutex = create_mutex();
+    counter->mutex = mutex;
+
+    struct count_pulses_data *data1 = create_count_pulses_data(counter, 1);
+    thread_start(count_pulses, data1);
+
+    struct count_pulses_data *data2 = create_count_pulses_data(counter, 2);
+    thread_start(count_pulses, data2);
+
+    while (true) {
+        sleep(1000);
+        mutex_acquire(mutex);
+        print_int(counter->count);
+        mutex_release(mutex);
+    }
+}
+\end{lstlisting}
+
+It's easy to make mistakes when programming using mutexes. The
+worst problem is if the programmer forgets to acquire the mutex
+before accessing the data structure that it protects. The
+consequence will be incorrect results, but this may be
+difficult to diagnose.
+
+Fortunately, VeriFast can help us catch these tricky bugs.
+Remember from the preceding sections that as a result of
+VeriFast's checks, each thread can access only the memory
+locations that it owns, and no two threads can (fully) own the
+same memory location at the same time. This prevents
+interference from concurrent accesses. But how, then, can
+threads share a mutable variable? The answer is, of course,
+using mutexes. When a mutex is created, it takes ownership of a
+certain set of memory locations, as specified by its \emph{lock
+invariant}. When a thread acquires a mutex, the memory
+locations that were owned by the mutex now become owned by the
+thread, until the thread releases the mutex, at which point the
+memory locations again become the property of the mutex. This
+way, by sharing a mutex, threads can indirectly share arbitrary
+memory locations in a well-synchronized way.
+
+The mutex functions offered by \texttt{threading.c} are
+specified in \texttt{threading.h} as follows:
+\begin{lstlisting}
+struct mutex;
+
+/*@
+predicate mutex(struct mutex *mutex; predicate() p);
+predicate mutex_held(struct mutex *mutex, predicate() p, int threadId, real frac);
+predicate create_mutex_ghost_arg(predicate() p) = true;
+@*/
+
+struct mutex *create_mutex();
+    //@ requires create_mutex_ghost_arg(?p) &*& p();
+    //@ ensures mutex(result, p);
+
+void mutex_acquire(struct mutex *mutex);
+    //@ requires [?f]mutex(mutex, ?p);
+    //@ ensures mutex_held(mutex, p, currentThread, f) &*& p();
+
+void mutex_release(struct mutex *mutex);
+    //@ requires mutex_held(mutex, ?p, currentThread, ?f) &*& p();
+    //@ ensures [f]mutex(mutex, p);
+
+void mutex_dispose(struct mutex *mutex);
+    //@ requires mutex(mutex, ?p);
+    //@ ensures p();
+\end{lstlisting}
+
+When you create a mutex, you need to specify the \emph{lock
+invariant} that specifies the memory locations that will be
+owned by the mutex. You do so by specifying a \emph{predicate
+value} (see Section~\ref{section:predvals}). Since the real
+function \lstinline!create_mutex! cannot take the predicate
+value as a real argument, it takes it as a ghost argument, in
+the form of the argument of the
+\lstinline!create_mutex_ghost_arg! predicate, which exists only
+for this purpose. That is, before calling
+\lstinline!create_mutex!, you need to close a
+\lstinline!create_mutex_ghost_arg! chunk, whose argument is the
+name of the predicate that specifies the lock invariant for the
+new mutex. The \lstinline!create_mutex! call consumes the ghost
+argument chunk and the lock invariant chunk itself, and
+produces a \lstinline!mutex! chunk that represents the mutex.
+This chunk specifies the lock invariant as its second argument.
+
+To allow multiple threads to share a mutex, a mutex chunk can
+be split into multiple fractions. Only a fraction of a mutex
+chunk is required to acquire the mutex. When the mutex is
+acquired, the \lstinline!mutex! chunk fraction is transformed
+into a \lstinline!mutex_held! chunk, that specifies not only
+the mutex and the lock invariant, but also the thread that
+acquired the mutex and the coefficient of the mutex chunk
+fraction that was used to acquire the mutex. The
+\lstinline!mutex_acquire! call additionally produces the lock
+invariant, giving the thread access to the memory locations
+that were owned by the mutex.
+
+The \lstinline!mutex_release! call consumes a
+\lstinline!mutex_held! chunk for the current thread, as well as
+the lock invariant, and produces the original \lstinline!mutex!
+chunk that was used to acquire the lock.
+
+If necessary, after a program is done using a mutex, it can
+reassemble all mutex chunk fractions and dispose the mutex;
+this returns ownership of the lock invariant to the thread that
+disposes the mutex.
+
+\begin{exercise}\label{exercise:mutexes}
+Verify the example program.
 \end{exercise}
 
 %\section{Character Arrays}
@@ -3866,6 +4076,114 @@ int join_fold_thread(struct fold_data *data)
     return data->acc;
     //@ leak data->tree |-> ?tree &*& [_]tree(tree, _);
     //@ leak data->f |-> _ &*& data->acc |-> _ &*& data->thread |-> _;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:mutexes}:
+mutexes.c}\label{solution:mutexes}
+
+\begin{lstlisting}
+#include "stdlib.h"
+#include "threading.h"
+
+void wait_for_pulse(int source);
+    //@ requires true;
+    //@ ensures true;
+
+void sleep(int millis);
+    //@ requires true;
+    //@ ensures true;
+
+void print_int(int n);
+    //@ requires true;
+    //@ ensures true;
+
+struct counter {
+    int count;
+    struct mutex *mutex;
+};
+
+//@ predicate_ctor counter(struct counter *counter)() = counter->count |-> _;
+
+struct count_pulses_data {
+    struct counter *counter;
+    int source;
+};
+
+struct count_pulses_data *create_count_pulses_data(struct counter *counter, int source)
+    //@ requires true;
+    //@ ensures result->counter |-> counter &*& result->source |-> source &*& malloc_block_count_pulses_data(result);
+{
+    struct count_pulses_data *data = malloc(sizeof(struct count_pulses_data));
+    if (data == 0) abort();
+    data->counter = counter;
+    data->source = source;
+    return data;
+}
+
+/*@
+
+predicate_family_instance thread_run_pre(count_pulses)(struct count_pulses_data *data, unit info) =
+    data->counter |-> ?counter &*& data->source |-> _ &*&
+    [1/2]counter->mutex |-> ?mutex &*& [1/3]mutex(mutex, counter(counter));
+predicate_family_instance thread_run_post(count_pulses)(struct count_pulses_data *data, unit info) = false;
+
+@*/
+
+void count_pulses(struct count_pulses_data *data) //@ : thread_run
+    //@ requires thread_run_pre(count_pulses)(data, ?info);
+    //@ ensures thread_run_post(count_pulses)(data, info);
+{
+    //@ open thread_run_pre(count_pulses)(data, ?info_);
+    struct counter *counter = data->counter;
+    int source = data->source;
+
+    struct mutex *mutex = counter->mutex;
+
+    while (true)
+        //@ invariant [1/3]mutex(mutex, counter(counter));
+    {
+        wait_for_pulse(source);
+        mutex_acquire(mutex);
+        //@ open counter(counter)();
+        counter->count++;
+        //@ close counter(counter)();
+        mutex_release(mutex);
+    }
+}
+
+int main() //@ : main
+    //@ requires true;
+    //@ ensures true;
+{
+    struct counter *counter = malloc(sizeof(struct counter));
+    if (counter == 0) abort();
+    counter->count = 0;
+    //@ close counter(counter)();
+    //@ close create_mutex_ghost_arg(counter(counter));
+    struct mutex *mutex = create_mutex();
+    counter->mutex = mutex;
+
+    struct count_pulses_data *data1 = create_count_pulses_data(counter, 1);
+    //@ close thread_run_pre(count_pulses)(data1, unit);
+    thread_start(count_pulses, data1);
+    //@ leak thread(_, _, _, _);
+
+    struct count_pulses_data *data2 = create_count_pulses_data(counter, 2);
+    //@ close thread_run_pre(count_pulses)(data2, unit);
+    thread_start(count_pulses, data2);
+    //@ leak thread(_, _, _, _);
+
+    while (true)
+        //@ invariant [1/3]mutex(mutex, counter(counter));
+    {
+        sleep(1000);
+        mutex_acquire(mutex);
+        //@ open counter(counter)();
+        print_int(counter->count);
+        //@ close counter(counter)();
+        mutex_release(mutex);
+    }
 }
 \end{lstlisting}
 

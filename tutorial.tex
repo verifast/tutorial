@@ -3,13 +3,18 @@
 \usepackage[pdftex]{hyperref}
 \usepackage{graphicx}
 \usepackage{listings}
+\usepackage[T1]{fontenc}
+\usepackage{ae,aecompl}
+\usepackage[scaled]{luximono}
 
 \addtolength{\hoffset}{-2cm}
 \addtolength{\textwidth}{4cm}
 \addtolength{\voffset}{-2cm}
 \addtolength{\textheight}{3cm}
 
-\lstset{language=c,columns=fullflexible,identifierstyle=\itshape} %,literate={&*&}{{$\mathrm{{\&}{*}{\&}}$}}1}
+%\lstset{language=c,columns=fullflexible,basicstyle=\ttfamily,identifierstyle=\itshape} %,literate={&*&}{{$\mathrm{{\&}{*}{\&}}$}}1}
+\lstset{language=c,columns=fullflexible,basicstyle=\ttfamily} %,literate={&*&}{{$\mathrm{{\&}{*}{\&}}$}}1}
+\lstset{moredelim=**[s][\itshape]{/*}{*/},moredelim=**[l][\itshape]{//},morekeywords={requires,ensures,true,false,predicate,lemma,fixpoint,predicate_ctor,leak,open,close,bool,invariant,inductive,assert,predicate_family,predicate_family_instance}}
 
 \newtheorem{exercise}{Exercise}
 
@@ -418,7 +423,7 @@ in the upper Locals pane.
 \begin{exercise}\label{exercise:deposit}
 Add a function that deposits a given amount into an account.
 Verify the following \lstinline!main! function.
-\begin{lstlisting}
+\begin{lstlisting}[basicstyle=\ttfamily\upshape]
 int main()
     //@ requires true;
     //@ ensures true;
@@ -447,7 +452,7 @@ will need to use C's conditional expressions
 \lstinline!account_set_balance!. Use the shorthand notation for
 field chunks: \lstinline!myAccount->balance |-> value!. Verify
 the following \lstinline!main! function.
-\begin{lstlisting}
+\begin{lstlisting}[basicstyle=\ttfamily\upshape]
 int main()
     //@ requires true;
     //@ ensures true;

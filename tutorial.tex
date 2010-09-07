@@ -2518,7 +2518,7 @@ When a thread attempts to acquire a mutex, there are two cases.
     attempts to acquire it, then the result depends on
     whether the mutex is re-entrant or non-re-entrant. If
     the mutex is re-entrant, the attempt succeeds and the
-    mutex still holds the lock. If the mutex is
+    thread still holds the lock. If the mutex is
     non-re-entrant, the attempt fails. This either means
     that the thread blocks forever, or that an error occurs
     and the program is terminated.

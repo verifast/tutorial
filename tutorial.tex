@@ -248,12 +248,13 @@ $\mathsf{balance}$ field. Indeed, the symbolic heap contains
 the $\mathsf{malloc\_block\_account}$ chunk but not the
 $\mathsf{account\_balance}$ chunk. What happened to it? Let's
 find out by stepping through the symbolic execution path.
-Select the third step. The $\mathsf{malloc}$ statement is about
+Select the second step. The $\mathsf{malloc}$ statement is about
 to be executed and the symbolic heap is empty. Select the next
 step. The $\mathsf{malloc}$ statement has added the
 $\mathsf{account\_balance}$ chunk and the
-$\mathsf{malloc\_block\_account}$ chunk. The if statement has
-no effect.
+$\mathsf{malloc\_block\_account}$ chunk.
+
+The if statement has no effect.
 
 We then arrive at the call of $\mathsf{account\_set\_balance}$.
 You will notice that this execution step has two sub-steps,
@@ -269,11 +270,15 @@ from the symbolic heap. Producing the postcondition means
 receiving the heap chunks offered by the function when it
 returns, thus adding them to the symbolic heap.
 
-Selecting the ``Consuming assertion'' step changes the layout
-of the VeriFast window.
+\begin{figure}
 \begin{center}
-\includegraphics[width=7cm]{illegal_access3.png}
+\includegraphics[width=10cm]{illegal_access3.png}
 \end{center}
+\caption{When stepping through a function call, VeriFast shows both the call site (in green, in the lower pane) and the callee's contract (in yellow, in the upper pane).}\label{figure:call}
+\end{figure}
+
+Selecting the ``Consuming assertion'' step changes the layout
+of the VeriFast window (see Figure~\ref{figure:call}).
 The source code pane is split into two
 parts. The upper part is used to display the contract of the
 function being called, while the lower part is used to display

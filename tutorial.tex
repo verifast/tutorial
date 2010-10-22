@@ -685,7 +685,7 @@ helper function. The contract need not specify the return value
 (since we did not see how to do that yet).
 \end{exercise}
 
-\section{Loops}
+\section{Loops}\label{section:loops}
 
 In Exercise~\ref{exercise:dispose}, we implemented
 \lstinline!stack_dispose! using a recursive function. However,
@@ -2888,32 +2888,31 @@ void putchar(char c);
 
 char *malloc(int count);
 
-void getchars(char *array, int count) {
+void getchars(char *start, int count) {
     if (count > 0) {
         char c = getchar();
-        *array = c;
-        getchars(array + 1, count - 1);
+        *start = c;
+        getchars(start + 1, count - 1);
     }
 }
 
-void putchars(char *array, int count) {
+void putchars(char *start, int count) {
     if (count > 0) {
-        char c = *array;
+        char c = *start;
         putchar(c);
-        putchars(array + 1, count - 1);
+        putchars(start + 1, count - 1);
     }
 }
 
 int main() {
     char *array = malloc(5);
-    if (array == 0) abort();
     getchars(array, 5);
     putchars(array, 5);
     putchars(array, 5);
     return 0;
 }
 \end{lstlisting}
-This program works. Now let's verify it.
+This program works.\footnote{We ignore \lstinline!malloc! failures for now.} Now let's verify it.
 
 It's always a good approach to simply run VeriFast on the program and see where it complains. If you verify the above program, VeriFast complains that the functions have no contract.
 Let's start by giving each function the simplest possible contract:
@@ -2924,47 +2923,48 @@ Let's start by giving each function the simplest possible contract:
 
 VeriFast now complains at the following line in function \lstinline!getchars!:
 \begin{lstlisting}
-        *array = c;
+        *start = c;
 \end{lstlisting}
-This statement writes character \lstinline!c! into the memory location at address \lstinline!array!.
+This statement writes character \lstinline!c! into the memory location at address \lstinline!start!.
 Whenever VeriFast sees such a statement, it checks that the function has permission to write to this location.
-Specifically, it checks that a chunk that matches \lstinline!character(array, _)! is present in the symbolic heap.
+Specifically, it checks that a chunk that matches \lstinline!character(start, _)! is present in the symbolic heap.
 In this case, there is no such chunk in the symbolic heap, since the requires clause of \lstinline!getchars! does not
 mention it and the function also does not get it from anywhere else.
 
 To solve this problem, we need to specify in the requires clause of function \lstinline!getchars! that whoever calls the function
-must give it permission to write to the location at address \lstinline!array!, at least if parameter \lstinline!count! is greater than zero.
+must give it permission to write to the location at address \lstinline!start!, at least if parameter \lstinline!count! is greater than zero.
 As a good citizen, we also give the permission back to the caller when we are done with it, as specified in the ensures clause:
 \begin{lstlisting}
-    //@ requires count > 0 ? character(array, _) : true;
-    //@ ensures count > 0 ? character(array, _) : true;
+    //@ requires count > 0 ? character(start, _) : true;
+    //@ ensures count > 0 ? character(start, _) : true;
 \end{lstlisting}
-If we run VeriFast again, we see that VeriFast now accepts the assignment to \lstinline!*array!. However, it now complains at the recursive call of
+If we run VeriFast again, we see that VeriFast now accepts the assignment to \lstinline!*start!. However, it now complains at the recursive call of
 \lstinline!getchars!. Indeed, if \lstinline!count! is greater than one, then the recursive call needs permission to access the location at address
-\lstinline!array + 1!. Let's extend our contract to reflect this:
+\lstinline!start + 1!. Let's extend our contract to reflect this:
 \begin{lstlisting}
-    //@ requires count > 0 ? character(array, _) &*& (count > 1 ? character(array + 1, _) : true) : true;
-    //@ ensures count > 0 ? character(array, _) &*& (count > 1 ? character(array + 1, _) : true) : true;
+    //@ requires count > 0 ? character(start, _) &*& (count > 1 ? character(start + 1, _) : true) : true;
+    //@ ensures count > 0 ? character(start, _) &*& (count > 1 ? character(start + 1, _) : true) : true;
 \end{lstlisting}
-Alas, if we run VeriFast again, we notice VeriFast complains again at the recursive call. Indeed, if \lstinline!count! is greater than 2,
-the recursive call now needs to permission to access the location at address \lstinline!array + 2!.
+Alas, if we run VeriFast again, we notice VeriFast complains again at the recursive call.\footnote{Remember to disable arithmetic overflow checking in the Verify menu.}
+Indeed, if \lstinline!count! is greater than 2,
+the recursive call now needs to permission to access the location at address \lstinline!start + 2!.
 
 We can patch up the contract again, but will it ever end? If we step back and think about what \lstinline!getchars! does, we realize that
-a call \lstinline!getchars(array, count)! requires permission to access the locations in the range \lstinline!array! through \lstinline!array + count - 1!.
+a call \lstinline!getchars(start, count)! requires permission to access the locations in the range \lstinline!start! through \lstinline!start + count - 1!.
 How can we express this? If we support only up to 5 characters, we can use the following precondition:
 \begin{lstlisting}
     /*@
     requires
         count <= 0 ? true :
-            character(array, _) &*&
+            character(start, _) &*&
             (count - 1 <= 0 ? true :
-                character(array + 1, _) &*&
+                character(start + 1, _) &*&
                 (count - 2 <= 0 ? true :
-                    character(array + 2, _) &*&
+                    character(start + 2, _) &*&
                     (count - 3 <= 0 ? true :
-                        character(array + 3, _) &*&
+                        character(start + 3, _) &*&
                         (count - 4 <= 0 ? true :
-                            character(array + 4, _) &*&
+                            character(start + 4, _) &*&
                             (count - 5 <= 0 ? true :
                                 false)))));
     @*/
@@ -2972,7 +2972,7 @@ How can we express this? If we support only up to 5 characters, we can use the f
 If we use this same assertion as the postcondition as well, function \lstinline!getchars! verifies.
 And if we use the same contract for \lstinline!putchars!, that function verifies as well.
 And we can use the same assertion as the postcondition of \lstinline!malloc!, provided that we
-replace the variable name \lstinline!array! by \lstinline!result!.
+replace the variable name \lstinline!start! by \lstinline!result!.
 The only problem left now is that VeriFast complains at the end of function \lstinline!main! that
 we leak five memory locations. We can tell VeriFast that we are happy to do so by inserting the following
 ghost statement at the end of the function:
@@ -2984,7 +2984,7 @@ ghost statement at the end of the function:
     @*/
 \end{lstlisting}
 The program now verifies. Great!
-\begin{exercise}\label{exercise:mychars}
+\begin{exercise}\label{exercise:characters}
 Modify the program so that it reads 100 characters.
 \end{exercise}
 Did you finish the exercise? No? I don't blame you. Of course, writing these contracts for large counts is totally impractical.
@@ -2992,84 +2992,203 @@ Did you finish the exercise? No? I don't blame you. Of course, writing these con
 The solution is to use \emph{recursive predicates}. Notice that the precondition of \lstinline!getchars! has a recursive structure. By giving a name to the assertion,
 and then using this name in the assertion itself, we can make the assertion go on forever:
 \begin{lstlisting}
-predicate mychars(char *array, int count) =
-    count <= 0 ? true : character(array, _) &*& mychars(array + 1, count - 1);
+predicate characters(char *start, int count) =
+    count <= 0 ? true : character(start, _) &*& characters(start + 1, count - 1);
 \end{lstlisting}
-You can obtain something very close to the precondition of \lstinline!getchars! by unrolling this predicate five times, i.e. by replacing the occurrence of \lstinline!mychars!
-with its definition five times. The only difference is that instead of \lstinline!false!, we get \lstinline!mychars(array + 5, count - 5)!. That is, \lstinline!mychars! doesn't stop
+You can obtain something very close to the precondition of \lstinline!getchars! by unrolling this predicate five times, i.e. by replacing the occurrence of \lstinline!characters!
+with its definition five times. The only difference is that instead of \lstinline!false!, we get \lstinline!characters(start + 5, count - 5)!. That is, \lstinline!characters! doesn't stop
 at 5 characters; it goes on forever.
 
-So, let's solve Exercise~\ref{exercise:mychars} by using \lstinline!mychars! in the contracts:
+So, let's solve Exercise~\ref{exercise:characters} by using \lstinline!characters! in the contracts:
 \begin{lstlisting}
 char getchar(); /*@ requires true; @*/ /*@ ensures true; @*/
 void putchar(char c); /*@ requires true; @*/ /*@ ensures true; @*/
 
 /*@
-predicate mychars(char *array, int count) =
-    count <= 0 ? true : character(array, _) &*& mychars(array + 1, count - 1);
+predicate characters(char *start, int count) =
+    count <= 0 ? true : character(start, _) &*& characters(start + 1, count - 1);
 @*/
 
 char *malloc(int count);
     //@ requires true;
-    //@ ensures mychars(result, count);
+    //@ ensures characters(result, count);
 
-void getchars(char *array, int count)
-    //@ requires mychars(array, count);
-    //@ ensures mychars(array, count);
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
 {
     if (count > 0) {
         char c = getchar();
-        *array = c;
-        getchars(array + 1, count - 1);
+        *start = c;
+        getchars(start + 1, count - 1);
     }
 }
 
-void putchars(char *array, int count)
-    //@ requires mychars(array, count);
-    //@ ensures mychars(array, count);
+void putchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
 {
     if (count > 0) {
-        char c = *array;
+        char c = *start;
         putchar(c);
-        putchars(array + 1, count - 1);
+        putchars(start + 1, count - 1);
     }
 }
 
 int main() /*@ requires true; @*/ /*@ ensures true; @*/
 {
     char *array = malloc(100);
-    if (array == 0) abort();
     getchars(array, 100);
     putchars(array, 100);
     putchars(array, 100);
-    //@ leak mychars(array, 100);
+    //@ leak characters(array, 100);
     return 0;
 }
 \end{lstlisting}
-This does'nt quite work yet. The problem is that VeriFast does not automatically replace a \lstinline!mychars! chunk with its definition, or vice versa. You need to do this explicitly by inserting
-\lstinline!open! and \lstinline!close! ghost commands. For example, when you run VeriFast on the above program, VeriFast complains at the assignment to \lstinline!*array! in function
-\lstinline!getchars! because it cannot find a chunk matching \lstinline!character(array, _)!. This chunk is in fact present; it's just that it is hidden inside the \lstinline!mychars! chunk. We need to
-open up the \lstinline!mychars! chunk so that VeriFast can see the \lstinline!character! chunk that is inside of it.
+This does'nt quite work yet. The problem is that VeriFast does not automatically replace a \lstinline!characters! chunk with its definition, or vice versa. You need to do this explicitly by inserting
+\lstinline!open! and \lstinline!close! ghost commands. For example, when you run VeriFast on the above program, VeriFast complains at the assignment to \lstinline!*start! in function
+\lstinline!getchars! because it cannot find a chunk matching \lstinline!character(start, _)!. This chunk is in fact present; it's just that it is hidden inside the \lstinline!characters! chunk. We need to
+open up the \lstinline!characters! chunk so that VeriFast can see the \lstinline!character! chunk that is inside of it.
 The following version of function \lstinline!getchars! verifies:
 \begin{lstlisting}
-void getchars(char *array, int count)
-    //@ requires mychars(array, count);
-    //@ ensures mychars(array, count);
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
 {
     if (count > 0) {
-        //@ open mychars(array, count);
+        //@ open characters(start, count);
         char c = getchar();
-        *array = c;
-        getchars(array + 1, count - 1);
-        //@ close mychars(array, count);
+        *start = c;
+        getchars(start + 1, count - 1);
+        //@ close characters(start, count);
     }
 }
 \end{lstlisting}
+Inserting the same commands in function \lstinline!putchars! yields a correct solution of Exercise~\ref{exercise:characters}.
 
 \begin{exercise}\label{exercise:xor}
 Implement and verify a simple encryption/decryption program. The program should read two arrays of 10 characters from standard input.
 It should then replace each character in the first array with the XOR of the character and the corresponding character in the second array. Write a recursive function to do this.
 It should then write the first array to standard output. The XOR of two characters \lstinline!c1! and \lstinline!c2! can be written in C as \lstinline!(char)(c1 ^ c2)!.
+\end{exercise}
+
+\section{Looping over an Array}\label{section:array-loops}
+
+The example program of the previous section, that reads a sequence of 100 characters from standard input and then writes it twice to standard output,
+is correct. However, it would probably not work if we attempted to read ten million characters. This is because functions \lstinline!getchars! and
+\lstinline!putchars! would in that scenario perform ten million nested recursive calls. This would most likely exhaust the call stack.\footnote{Unless the
+C compiler performs tail call optimization. But the C standard does not require compilers to do so.} Therefore, it is safer to rewrite these functions so that
+they use a loop instead of recursion. Let's rewrite function \lstinline!getchars!:
+\begin{lstlisting}
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    for (int i = 0; i < count; i++) {
+        char c = getchar();
+        *(start + i) = c;
+    }
+}
+\end{lstlisting}
+If we attempt to verify the program now, VeriFast complains that it needs a loop invariant. It needs a loop invariant so that it can
+verify the loop body only once, starting from a symbolic state that represents the start of an arbitrary iteration of the loop. The loop
+invariant describes this symbolic state. Specifically, it describes the contents of the symbolic heap, as well as any required information
+about the value of the local variables that are modified by the loop. (See Section~\ref{section:loops} for more information about loops.)
+
+In the example, at the start of each loop iteration, the symbolic heap contains the \lstinline!characters! chunk, and the value of variable
+\lstinline!i! is between zero and \lstinline!count!. We encode this as follows:
+\begin{lstlisting}
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    for (int i = 0; i < count; i++)
+        //@ invariant characters(start, count) &*& 0 <= i;
+    {
+        char c = getchar();
+        *(start + i) = c;
+    }
+}
+\end{lstlisting}
+VeriFast now complains that it cannot find the permission to write the character at address \lstinline!start + i! in the symbolic heap.
+This permission is in fact present, but it is hidden inside the \lstinline!characters(start, count)! chunk. In the easy case, it is sufficient
+to simply open a chunk in order to reveal the permissions that are hidden inside of it. However, in this case, the permission is hidden below
+multiple layers of the \lstinline!characters! predicate. In fact, it is hidden below exactly \lstinline!i + 1! layers. It would require
+\lstinline!i + 1! open operations to reveal the permission. We cannot write these operations directly in the program text, since we do not know
+how many operations to write.
+
+The solution is to first rewrite the \lstinline!characters(start, count)! chunk into an equivalent set of chunks
+in such a way that the permission that VeriFast is looking for comes to the surface. Notice that the \lstinline!characters(start, count)! chunk describes the same set of
+memory permissions as the following pair of chunks:
+\begin{lstlisting}
+characters(start, i) &*& characters(start + i, count - i)
+\end{lstlisting}
+If we can rewrite the chunk into this form, we can then simply open the \lstinline!characters(start + i, count - i)! chunk to obtain our
+\lstinline!character(start + i, _)! permission.
+
+We can perform this rewrite by first performing \lstinline!i! open operations, to lay bare the first \lstinline!i! characters,
+and then performing \lstinline!i + 1! close operations, to combine these \lstinline!i! characters into a \lstinline!characters(start, i)! chunk.
+To perform these operations, we can write a helper function. A helper function that serves only to perform ghost operations is best written as a
+\emph{lemma function}. A lemma function is like an ordinary C function, except that it starts with the \lstinline!lemma! keyword and it is written
+inside an annotation:
+\begin{lstlisting}
+/*@
+lemma void split_characters_chunk(char *start, int i)
+    requires characters(start, ?count) &*& 0 <= i &*& i <= count;
+    ensures characters(start, i) &*& characters(start + i, count - i);
+{
+    if (i == 0) {
+        close characters(start, 0);
+    } else {
+        open characters(start, count);
+        split_characters_chunk(start + 1, i - 1);
+        close characters(start, i);
+    }
+}
+@*/
+\end{lstlisting}
+Like an ordinary function, a lemma function has a contract and a body. The contract of the above lemma function, \lstinline!split_characters_chunk!,
+states that the function requires a single characters chunk, as well as a value \lstinline!i! that lies between zero and \lstinline!count!, and
+gives back two chunks: one that contains the first \lstinline!i! characters, and one that contains the remaining \lstinline!count - i! characters.
+
+The function implementation first checks if \lstinline!i! equals zero. If it does, the incoming chunk corresponds exactly to the second chunk that needs to be
+returned. The function only needs to generate the first chunk, but since \lstinline!i! equals zero, this is an empty chunk and can be created simply by
+closing it.
+
+In case \lstinline!i! is not equal to zero, the function first opens the incoming chunk. This lays bare the first character (the one at \lstinline!start!) as
+well as the \lstinline!characters! chunk that goes from \lstinline!start + 1! to the end. The function then splits the latter chunk into a part that contains
+the first \lstinline!i - 1! characters and a part that contains the remaining \lstinline!count - i! characters. This latter chunk is the second chunk that needs
+to be returned. Finally, it bundles the \lstinline!character!
+chunk at \lstinline!start! up with the \lstinline!characters(start + 1, i - 1)! chunk that was returned by the recursive call, to obtain the first chunk
+that needs to be returned.
+
+To verify the assignment to \lstinline!*(start + i)! in function \lstinline!getchars!, we now simply need to call the lemma function and then open
+chunk \lstinline!characters(start + i, count - i)!:
+\begin{lstlisting}
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    for (int i = 0; i < count; i++)
+        //@ invariant characters(start, count) &*& 0 <= i;
+    {
+        char c = getchar();
+        //@ split_characters_chunk(start, i);
+        //@ open characters(start + i, count - i);
+        *(start + i) = c;
+    }
+}
+\end{lstlisting}
+
+VeriFast now accepts the assignment. It now complains when checking the loop invariant at the end of the loop body. It complains that it cannot find chunk
+\lstinline!characters(start, count)!. Notice that this is again a matter of rewriting the symbolic heap: all memory permissions described by
+\lstinline!characters(start, count)! are in fact in the symbolic heap, just not in the packaging in which VeriFast expects them. To satisfy VeriFast,
+we need to first close the \lstinline!characters(start + i, count - i)! chunk again and then call a lemma function that merges the
+\lstinline!characters(start, i)! and \lstinline!characters(start + i, count - i)! chunks back into a single \lstinline!characters(start, count)! chunk.
+
+\begin{exercise}\label{exercise:characters_loop}
+Write the lemma function \lstinline!merge_characters_chunks!. Then insert a call to this function into \lstinline!getchars! so that \lstinline!getchars!
+verifies. Then also rewrite \lstinline!putchars! to use a loop instead of recursion and verify the resulting program.
 \end{exercise}
 
 \section{Solutions to Exercises}
@@ -4637,6 +4756,164 @@ int main() //@ : main
         int source = wait_for_source();
         count_pulses_async(counter, source);
     }
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:characters}: characters.c}\label{solution:characters}
+
+The solution is given in the text of Section~\ref{section:arrays}.
+
+\subsection{Exercise \ref{exercise:xor}: xor.c}\label{solution:xor}
+
+\begin{lstlisting}
+char getchar(); /*@ requires true; *@/ /*@ ensures true; @*/
+void putchar(char c); /*@ requires true; *@/ /*@ ensures true; @*/
+
+/*@
+predicate characters(char *start, int count) =
+    count <= 0 ? true : character(start, _) &*& characters(start + 1, count - 1);
+@*/
+
+char *malloc(int count);
+    //@ requires true;
+    //@ ensures characters(result, count);
+
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    if (count > 0) {
+        //@ open characters(start, count);
+        char c = getchar();
+        *start = c;
+        getchars(start + 1, count - 1);
+        //@ close characters(start, count);
+    }
+}
+
+void xorchars(char *text, char *key, int count)
+    //@ requires characters(text, count) &*& characters(key, count);
+    //@ ensures characters(text, count) &*& characters(key, count);
+{
+    if (count > 0) {
+        //@ open characters(text, count);
+        //@ open characters(key, count);
+        *text = (char)(*text ^ *key);
+        xorchars(text + 1, key + 1, count - 1);
+        //@ close characters(text, count);
+        //@ close characters(key, count);
+    }
+}
+
+void putchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    if (count > 0) {
+        //@ open characters(start, count);
+        char c = *start;
+        putchar(c);
+        putchars(start + 1, count - 1);
+        //@ close characters(start, count);
+    }
+}
+
+int main() /*@ requires true; @*/ /*@ ensures true; @*/
+{
+    char *text = malloc(10);
+    char *key = malloc(10);
+    getchars(text, 10);
+    getchars(key, 10);
+    xorchars(text, key, 10);
+    putchars(text, 10);
+    //@ leak characters(text, 10) &*& characters(key, 10);
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:characters_loop}: characters\_loop.c}\label{solution:characters_loop}
+
+\begin{lstlisting}
+char getchar(); /*@ requires true; *@/ /*@ ensures true; @*/
+void putchar(char c); /*@ requires true; *@/ /*@ ensures true; @*/
+
+/*@
+predicate characters(char *start, int count) =
+    count <= 0 ? true : character(start, _) &*& characters(start + 1, count - 1);
+@*/
+
+char *malloc(int count);
+    //@ requires true;
+    //@ ensures characters(result, count);
+
+/*@
+
+lemma void split_characters_chunk(char *start, int i)
+    requires characters(start, ?count) &*& 0 <= i &*& i <= count;
+    ensures characters(start, i) &*& characters(start + i, count - i);
+{
+    if (i == 0) {
+        close characters(start, 0);
+    } else {
+        open characters(start, count);
+        split_characters_chunk(start + 1, i - 1);
+        close characters(start, i);
+    }
+}
+
+lemma void merge_characters_chunk(char *start)
+    requires characters(start, ?i) &*& characters(start + i, ?count) &*& 0 <= i &*& 0 <= count;
+    ensures characters(start, i + count);
+{
+    open characters(start, i);
+    if (i != 0) {
+        merge_characters_chunk(start + 1);
+        close characters(start, i + count);
+    }
+}
+
+@*/
+
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    for (int i = 0; i < count; i++)
+        //@ invariant characters(start, count) &*& 0 <= i;
+    {
+        char c = getchar();
+        //@ split_characters_chunk(start, i);
+        //@ open characters(start + i, count - i);
+        *(start + i) = c;
+        //@ close characters(start + i, count - i);
+        //@ merge_characters_chunk(start);
+    }
+}
+
+void putchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    for (int i = 0; i < count; i++)
+        //@ invariant characters(start, count) &*& 0 <= i;
+    {
+        //@ split_characters_chunk(start, i);
+        //@ open characters(start + i, count - i);
+        char c = *(start + i);
+        //@ close characters(start + i, count - i);
+        //@ merge_characters_chunk(start);
+        putchar(c);
+    }
+}
+
+int main() /*@ requires true; @*/ /*@ ensures true; @*/
+{
+    char *array = malloc(100);
+    getchars(array, 100);
+    putchars(array, 100);
+    putchars(array, 100);
+    //@ leak characters(array, 100);
+    return 0;
 }
 \end{lstlisting}
 

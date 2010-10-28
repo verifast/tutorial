@@ -935,7 +935,7 @@ and by requiring that the value of the inductive parameter of a
 recursive call is a constructor argument of the value of the
 inductive parameter of the caller.
 
-\section{Lemmas}
+\section{Lemmas}\label{section:lemmas}
 
 Let's return to our initial annotated stack implementation (the
 solution to Exercise~\ref{exercise:stack}). Let's add a
@@ -2877,7 +2877,7 @@ int main()
 }
 \end{lstlisting}
 This program works.\footnote{We simplified the return type of \lstinline!getchar! a little bit; the real function returns an int. But this version should compile and run just fine.}
-If we run the program and enter \texttt{Hello}, we get back \texttt{olleH}.
+If we run the program and enter \texttt{Hello}, we get back \texttt{HelloHello}.
 
 However, clearly this approach is not practical for large numbers of characters. One approach that works for large numbers of characters is to use an array of characters. We allocate
 the array using the standard C function \lstinline!malloc! and then read and write the characters using a recursive function. For now, we don't worry about freeing the array at the end
@@ -3189,6 +3189,198 @@ we need to first close the \lstinline!characters(start + i, count - i)! chunk ag
 \begin{exercise}\label{exercise:characters_loop}
 Write the lemma function \lstinline!merge_characters_chunks!. Then insert a call to this function into \lstinline!getchars! so that \lstinline!getchars!
 verifies. Then also rewrite \lstinline!putchars! to use a loop instead of recursion and verify the resulting program.
+\end{exercise}
+
+\section{Recursive Loop Proofs}\label{section:recursive-loop-proofs}
+
+An important observation that we can make after the previous section, is that verifying the recursive version of function \lstinline!getchars!
+is much easier than verifying the version that uses a loop. Indeed, verifying the loop requires us to maintain a loop invariant which describes all of
+the permissions (i.e. heap chunks) used by the loop. In contrast, the contract of a recursive function describes only the permissions used by a
+specific call of the function; at the point of a recursive call, if some of the permissions used by the caller are not required by the callee,
+then these permissions simply sit in the caller's symbolic heap for the duration of the recursive call.
+
+Does this mean that we have to make a choice between run-time performance and verification-time convenience? Fortunately, we do not! A researcher called
+Thomas Tuerk recently proposed an approach for verifying loops that is as convenient as verifying the corresponding recursive function. Specifically,
+Tuerk noticed that any loop can be rewritten into an equivalent recursive function. Consider the following loop:
+\begin{lstlisting}
+while (condition) {
+    ... body ...
+}
+\end{lstlisting}
+This loop is equivalent to the call
+\begin{lstlisting}
+iter();
+\end{lstlisting}
+where function \lstinline!iter! is defined as
+\begin{lstlisting}
+void iter() {
+    if (condition) {
+        ... body ...
+        iter();
+    }
+}
+\end{lstlisting}
+As a concrete example, consider function \lstinline!getchars! from the previous section. If we rewrite the \lstinline!for! loop as a \lstinline!while!
+loop, we get the following code:
+\begin{lstlisting}
+void getchars(char *start, int count) {
+    int i = 0;
+    while (i < count) {
+        char c = getchar();
+        *(start + i) = c;
+        i++;
+    }
+}
+\end{lstlisting}
+We can now apply the above translation scheme to replace the loop with an equivalent local recursive function:
+\begin{lstlisting}
+void getchars(char *start, int count) {
+    int i = 0;
+    void iter() {
+        if (i < count) {
+            char c = getchar();
+            *(start + i) = c;
+            i++;
+            iter();
+        }
+    }
+    iter();
+}
+\end{lstlisting}
+Note that this translation scheme uses local functions. Standard C does not have local functions, but the GNU C compiler, gcc, does. gcc compiles
+and runs the above function correctly.
+
+After noticing that each loop can be rewritten into an equivalent recursive function, Tuerk realized that this meant that a loop can be verified
+in the same way that a recursive function is verified: by providing a contract for the recursive function.
+
+VeriFast supports this approach. When verifying a loop, instead of specifying a loop invariant, you can specify a loop contract consisting of a
+precondition and a postcondition. VeriFast will then verify the loop as if it was written using a local recursive function. To see how this works, let's
+first verify the version of function \lstinline!getchars! that uses a local recursive function \lstinline!iter!:
+\begin{lstlisting}
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    int i = 0;
+    void iter()
+        //@ requires characters(start + i, count - i);
+        //@ ensures characters(start + old_i, count - old_i);
+    {
+        if (i < count) {
+            //@ open characters(start + i, count - i);
+            char c = getchar();
+            *(start + i) = c;
+            i++;
+            iter();
+            //@ close characters(start + old_i, count - old_i);
+        }
+    }
+    iter();
+}
+\end{lstlisting}
+Notice that we use variable names prefixed by \lstinline!old_! to refer to the value of the variable at the start of the function call.
+VeriFast currently does not support local functions, but if it did, this function would verify successfully.
+
+All that now remains to be done in order to verify the version of \lstinline!getchars! that uses a \lstinline!while! loop, is to transplant the
+annotations that we inserted for the recursive function, back into the loop version:
+\begin{lstlisting}
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    int i = 0;
+    while (i < count)
+        //@ requires characters(start + i, count - i);
+        //@ ensures characters(start + old_i, count - old_i);
+    {
+        //@ open characters(start + i, count - i);
+        char c = getchar();
+        *(start + i) = c;
+        i++;
+        //@ recursive_call();
+        //@ close characters(start + old_i, count - old_i);
+    }
+}
+\end{lstlisting}
+Notice that we inserted a \lstinline!recursive_call();! ghost statement to indicate where the imaginary recursive call occurs. VeriFast verifies
+this function successfully.
+
+\begin{exercise}\label{exercise:tuerk}
+Write a version of function \lstinline!putchars! that uses a \lstinline!while! loop and verify it using a loop contract.
+\end{exercise}
+
+\begin{exercise}\label{exercise:stack_tuerk}
+Verify function \lstinline!stack_get_count! from Section~\ref{section:lemmas} using a loop contract. You do not need
+the \lstinline!lseg! predicate or any lemmas for this proof! Note, however, that you will need to rewrite the \lstinline!while!
+loop into a \lstinline!for (;;)! loop (or, equivalently, a \lstinline!while (true)! loop) because you need to execute a ghost
+command before exiting the loop.
+\end{exercise}
+
+\section{Strings}\label{section:strings}
+
+In C programs, strings are conventionally stored in memory as \emph{zero-terminated} character sequences. For example, the string
+\lstinline!"Hello"! is stored as \lstinline!'H'!,\lstinline!'e'!,\lstinline!'l'!, \lstinline!'l'!, \lstinline!'o'!, \lstinline!0!. This means a function
+that computes the length of a string could be written as follows:
+\begin{lstlisting}
+int strlen(char *s) {
+    char *c = s;
+    while (*c != 0) { c++; }
+    return c - s;
+}
+\end{lstlisting}
+Here is a simple main program that uses this function:
+\begin{lstlisting}
+int main() {
+    int n = strlen("Hello, world!");
+    assert(n == 13);
+    return 0;
+}
+\end{lstlisting}
+
+How do we verify this function and this main program?
+
+The precondition of function \lstinline!strlen! must specify that the caller must supply sufficient permissions to access all locations starting at
+address \lstinline!s!, up to and including the first location after \lstinline!s! whose value is zero. Can we do this using the \lstinline!characters!
+predicate of the previous sections? No, we cannot, since if we use this predicate, we cannot talk about the values of the characters.
+
+One approach for specifying function \lstinline!strlen! is to modify predicate \lstinline!characters! so that it has a list of character values as its
+second argument instead of just a count of the number of characters. Such a predicate is in fact built into VeriFast: it is called \lstinline!chars! and it
+is declared in the built-in header file \lstinline!prelude.h! as follows:
+\begin{lstlisting}
+predicate chars(char *array, list<char> cs) =
+    switch (cs) {
+        case nil: return true;
+        case cons(c, cs0): return character(array, c) &*& chars(array + 1, cs0);
+    };
+\end{lstlisting}
+Using this predicate, we can specify function \lstinline!strlen! as follows:
+\begin{lstlisting}
+int strlen(char *s)
+    //@ requires chars(s, ?cs) &*& mem('\0', cs) == true;
+    //@ ensures chars(s, cs) &*& result == index_of('\0', cs);
+\end{lstlisting}
+We are using the fixpoint functions \lstinline!mem! and \lstinline!index_of! defined in the built-in header file \lstinline!list.h!. Function
+\lstinline!mem(x, xs)! returns \lstinline!true! if \lstinline!x! is an element of the list \lstinline!xs! and \lstinline!false! otherwise.
+Function \lstinline!index_of(x, xs)! returns the index of the first occurrence of \lstinline!x! in list \lstinline!xs!, or \lstinline!-1! if \lstinline!x!
+does not occur in \lstinline!xs!.
+
+Given this specification, the function is easy to verify.
+
+Let's now attempt to verify the main program. Unfortunately, this fails. The reason is that the precondition of function \lstinline!strlen! requires full
+permission for the string, i.e. permission to read and modify the string's characters. However, a C string literal is \emph{immutable}; the program must
+not modify it. VeriFast reflects this by generating only a \emph{fractional permission} for the string literal (see Section~\ref{section:fractions}).
+
+However, fortunately, function \lstinline!strlen! does not actually modify the string that it operates on, so we can weaken its contract so that it requires
+only a fractional permission:
+\begin{lstlisting}
+int strlen(char *s)
+    //@ requires [?f]chars(s, ?cs) &*& mem('\0', cs) == true;
+    //@ ensures [f]chars(s, cs) &*& result == index_of('\0', cs);
+\end{lstlisting}
+
+\begin{exercise}\label{exercise:strlen}
+Verify function \lstinline!strlen! and the main program. Use a loop contract (see Section~\ref{section:recursive-loop-proofs}) to verify the loop.
+Note that you'll need to move the loop condition into the body of the loop.
 \end{exercise}
 
 \section{Solutions to Exercises}
@@ -4913,6 +5105,90 @@ int main() /*@ requires true; @*/ /*@ ensures true; @*/
     putchars(array, 100);
     putchars(array, 100);
     //@ leak characters(array, 100);
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:tuerk}: tuerk.c}\label{solution:tuerk}
+
+\begin{lstlisting}
+void putchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    int i = 0;
+    while (i < count)
+        //@ requires characters(start + i, count - i);
+        //@ ensures characters(start + old_i, count - old_i);
+    {
+        //@ open characters(start + i, count - i);
+        putchar(*(start + i));
+        i++;
+        //@ recursive_call();
+        //@ close characters(start + old_i, count - old_i);
+    }
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:stack_tuerk}: stack\_tuerk.c}\label{solution:stack_tuerk}
+
+\begin{lstlisting}
+int stack_get_count(struct stack *stack)
+    //@ requires stack(stack, ?count);
+    //@ ensures stack(stack, count) &*& result == count;
+{
+    //@ open stack(stack, count);
+    struct node *n = stack->head;
+    int i = 0;
+    for (;;)
+        //@ requires nodes(n, ?count1);
+        //@ ensures nodes(old_n, count1) &*& i == old_i + count1;
+    {
+        //@ open nodes(n, count1);
+        if (n == 0) {
+            //@ close nodes(n, count1);
+            break;
+        }
+        n = n->next;
+        i++;
+        //@ recursive_call();
+        //@ close nodes(old_n, count1);
+    }
+    //@ close stack(stack, count);
+    return i;
+}
+\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:strlen}: strlen.c}\label{solution:strlen}
+
+\begin{lstlisting}
+int strlen(char *s)
+    //@ requires [?f]chars(s, ?cs) &*& mem('\0', cs) == true;
+    //@ ensures [f]chars(s, cs) &*& result == index_of('\0', cs);
+{
+    char *c = s;
+    for (;;)
+        //@ requires [f]chars(c, ?cs1) &*& mem('\0', cs1) == true;
+        //@ ensures [f]chars(old_c, cs1) &*& c - old_c == index_of('\0', cs1);
+    {
+        //@ open [f]chars(c, cs1);
+        if (*c == 0) {
+            //@ close [f]chars(c, cs1);
+            break;
+        }
+        c++;
+        //@ recursive_call();
+        //@ close [f]chars(old_c, cs1);
+    }
+    return c - s;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    int n = strlen("Hello, world!");
+    assert(n == 13);
     return 0;
 }
 \end{lstlisting}

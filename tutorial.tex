@@ -3096,7 +3096,7 @@ invariant describes this symbolic state. Specifically, it describes the contents
 about the value of the local variables that are modified by the loop. (See Section~\ref{section:loops} for more information about loops.)
 
 In the example, at the start of each loop iteration, the symbolic heap contains the \lstinline!characters! chunk, and the value of variable
-\lstinline!i! is between zero and \lstinline!count!. We encode this as follows:
+\lstinline!i! is nonnegative. We encode this as follows:
 \begin{lstlisting}
 void getchars(char *start, int count)
     //@ requires characters(start, count);
@@ -3254,7 +3254,7 @@ After noticing that each loop can be rewritten into an equivalent recursive func
 in the same way that a recursive function is verified: by providing a contract for the recursive function.
 
 VeriFast supports this approach. When verifying a loop, instead of specifying a loop invariant, you can specify a loop contract consisting of a
-precondition and a postcondition. VeriFast will then verify the loop as if it was written using a local recursive function. To see how this works, let's
+precondition and a postcondition. VeriFast will then verify the loop as if it were written using a local recursive function. To see how this works, let's
 first verify the version of function \lstinline!getchars! that uses a local recursive function \lstinline!iter!:
 \begin{lstlisting}
 void getchars(char *start, int count)

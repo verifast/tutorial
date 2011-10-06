@@ -447,10 +447,10 @@ this check in the \textbf{Verify} menu.
 \end{exercise}
 
 \begin{exercise}\label{exercise:limit}
-Add a field \lstinline!limit! to struct \lstinline!account!.
+Add a field \lstinline!limit! to struct \lstinline!account! that specifies the minimum balance of the account. (It is typically either zero or a negative number.)
 The limit is specified at creation time. Further add a function
 to withdraw a given amount from an account. The function must
-not withdraw more than allowed by the limit. The function
+respect the limit; if withdrawing the requested amount would violate the limit, then the largest amount that can be withdrawn without violating the limit is withdrawn. The function
 returns the amount actually withdrawn as its return value. You
 will need to use C's conditional expressions
 \lstinline!condition ? value1 : value2!. Remove function

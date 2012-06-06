@@ -55,6 +55,21 @@ may also be unknown unsoundnesses.} that the program
     the source code.
 \end{itemize}
 
+Many errors in C programs, such as illegal memory accesses and
+data races, are generally very difficult to detect by
+conventional means such as testing or code review, since they
+are often subtle and typically do not cause a clean crash but
+have unpredictable effects that are difficult to diagnose.
+However, many security-critical and safety-critical programs,
+such as operating systems, device drivers, web servers (that
+may serve e-commerce or e-banking applications), embedded
+software for automobiles, airplanes, space applications,
+nuclear and chemical plants, etc.\ are written in C, where
+these programming errors may enable cyber-attacks or cause
+injuries. For such programs, formal verification approaches
+such as VeriFast may be the most effective way to achieve the
+desired level of reliability.
+
 We will now proceed to introduce the tool's features step by
 step. To try the examples and exercises in this tutorial
 yourself, please download the release from the VeriFast website
@@ -68,15 +83,24 @@ graphical user interface (\texttt{vfide.exe}).
 
 \section{Example: illegal\_access.c}
 
+To illustrate how VeriFast can be used to detect programming
+errors that are difficult to spot through testing or code
+review, we start by applying the tool to a very simple C
+program that contains two subtle errors.
+
 Please start \texttt{vfide.exe} with the
-\texttt{illegal\_access.c} program that can be found on the VeriFast homepage. The program will be shown
-in the VeriFast IDE. To verify the program, choose the
-\textbf{Verify program} command in the \textbf{Verify} menu,
-press the \textbf{Play} toolbar button, or press F5. You will
-see something like this:
+\texttt{illegal\_access.c} program that can be found on the
+VeriFast homepage. The program will be shown in the VeriFast
+IDE. To verify the program, choose the \textbf{Verify program}
+command in the \textbf{Verify} menu, press the \textbf{Play}
+toolbar button, or press F5. You will see something like
+Fig~\ref{figure:illegal-access1}.
+\begin{figure}
 \begin{center}
 \includegraphics[width=7cm]{illegal_access.png}
 \end{center}
+\caption{A screenshot of \texttt{illegal\_access.c} in the VeriFast IDE}\label{figure:illegal-access1}
+\end{figure}
 The program attempts to access a field of a struct instance
 allocated using $\mathit{malloc}$. However, if there is
 insufficient memory, $\mathit{malloc}$ returns zero and no
@@ -118,10 +142,14 @@ function anyway, place the cursor on the last line (i.e., on
 the brace that closes the function body) and choose the
 \textbf{Run to cursor} command from the \textbf{Verify} menu,
 press the \textbf{Run to cursor} toolbar button, or press
-Ctrl+F5.
+Ctrl+F5. (See Fig.~\ref{figure:illegal-access2}.)
+\begin{figure}
 \begin{center}
 \includegraphics[width=7cm]{illegal_access2.png}
 \end{center}
+\caption{The VeriFast IDE shows a symbolic execution path of function $\mathsf{main}$}\label{figure:illegal-access2}
+\end{figure}
+
 Running to the cursor means showing an execution path that
 reaches the cursor. In general, there may be multiple such
 paths; in that case, the first such path is chosen (in the

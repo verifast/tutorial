@@ -175,6 +175,54 @@ instance's field, and the permission to free the struct
 instance. This prevents illegal memory accesses and double free
 errors.
 
+\section{malloc\_block Chunks}\label{section:malloc_block}
+
+To better understand why the $\mathit{malloc}$ statement
+generates both an $\mathsf{account\_balance}$ chunk and a
+$\mathsf{malloc\_}$\-$\mathsf{block\_account}$ chunk, change
+the program so that the struct instance is allocated as a local
+variable on the stack instead of being allocated on the heap:
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    struct account myAccountLocal;
+    struct account *myAccount = &myAccountLocal;
+    myAccount->balance = 5;
+    free(myAccount);
+    return 0;
+}
+\end{lstlisting}
+This program first allocates an instance of struct
+$\mathsf{account}$ on the stack and calls it
+$\mathsf{myAccountLocal}$. It then assigns the address of this
+struct instance to pointer variable $\mathsf{myAccount}$. The
+remainder of the program is as before: the program initializes
+the $\mathsf{balance}$ field to value 5 and then attempts to
+free the struct instance.
+
+If we ask VeriFast to verify this program, VeriFast reports the
+error $$\textsf{No matching heap chunks:
+malloc\_block\_account(myAccountLocal\_addr)}$$ at the
+$\mathit{free}$ statement. Indeed, this statement is incorrect,
+since $\mathit{free}$ may only be applied to a struct instance
+allocated on the heap by $\mathsf{malloc}$, not to a struct
+instance allocated on the stack as a local variable.
+
+VeriFast detects this error as follows: 1) VeriFast generates a
+$\mathsf{malloc\_block}$ chunk only for struct instances
+allocated using $\mathit{malloc}$, not for struct instances
+allocated on the stack. 2) When verifying a $\mathit{free}$
+statement, VeriFast checks that a $\mathsf{malloc\_block}$
+chunk exists for the struct instance being freed.
+
+Notice that, in contrast, the $\mathsf{account\_balance}$ chunk
+is generated in both cases. As a result, the statement that
+initializes the $\mathsf{balance}$ field verifies successfully,
+regardless of whether the struct instance was allocated on the
+heap or on the stack.
+
 \section{Functions and Contracts}\label{section:functions}
 
 We continue to play with the example of the previous section.

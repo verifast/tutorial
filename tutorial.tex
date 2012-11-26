@@ -1013,6 +1013,12 @@ inductive parameter of the caller.
 
 \section{Lemmas}\label{section:lemmas}
 
+\emph{Note: Sections~\ref{section:arrays} to
+\ref{section:strings} offer an alternative introduction to
+recursive predicates. If you are not yet comfortable with
+recursive predicates, refer to these sections before starting
+the present section.}
+
 Let's return to our initial annotated stack implementation (the
 solution to Exercise~\ref{exercise:stack}). Let's add a
 \lstinline!stack_get_count! function that returns the number of
@@ -2235,7 +2241,10 @@ threads, which may then be scheduled by the operating system on
 both cores simultaneously.
 
 Unfortunately, the C language does not define a standard
-mechanism for writing multithreaded programs. Programs for
+mechanism for writing multithreaded programs.\footnote{The
+recent C standard revision C11 introduces support for
+multithreading, but it is not yet widely supported.}
+Programs for
 Windows can use the Windows API, and programs for Unix-like
 operating systems can typically use the POSIX pthreads API.
 However, the VeriFast distribution includes a wrapper around
@@ -2566,6 +2575,282 @@ Verify the memory safety of the program. Adapt function
 \lstinline!1/2! fraction of the tree chunk. Note: decimal
 notation is not supported; use fractional notation instead.
 \end{exercise}
+
+\section{Precise Predicates}\label{section:precise}
+
+The program of the previous section leaks large amounts of
+memory. This is fine, since the leaks occur only just before
+the program ends anyway. However, suppose now that this program
+was part of a larger, long-running program; in that case it
+would be important to eliminate the leaks. Therefore, in this
+section, let's attempt to eliminate the \lstinline|leak|
+commands from the program of the previous section.
+
+First of all, we need to update the C program so that it
+properly deallocates all dynamically allocated memory. We need to introduce a function \lstinline|dispose_tree| and update
+functions \lstinline|join_fold_thread| and \lstinline|main|:
+\begin{lstlisting}
+void dispose_tree(struct tree *tree)
+{
+    if (tree != 0) {
+        dispose_tree(tree->left);
+        dispose_tree(tree->right);
+        free(tree);
+    }
+}
+
+int join_fold_thread(struct fold_data *data)
+{
+    thread_join(data->thread);
+    int result = data->acc;
+    free(data);
+    return result;
+}
+
+int main()
+{
+    struct tree *tree = make_tree(21);
+    struct fold_data *sumData = start_fold_thread(tree, sum_function, 0);
+    struct fold_data *productData = start_fold_thread(tree, product_function, 1);
+    int sum = join_fold_thread(sumData);
+    int product = join_fold_thread(productData);
+    dispose_tree(tree);
+    return product - sum;
+}
+\end{lstlisting}
+
+Updating the annotations is slightly trickier. First, let's do
+the easy part: verifying the \lstinline|free| statement in
+function \lstinline|join_fold_thread|. It already has almost
+all required permissions; only the
+\lstinline|malloc_block_fold_data| chunk is missing. This chunk
+is leaked in function \lstinline|start_fold_thread|. Removing
+that \lstinline|leak| statement and adding the chunk to the
+\lstinline|ensures| clause of \lstinline|start_fold_thread| and
+the \lstinline|requires| clause of \lstinline|join_fold_thread|
+solves that problem; the \lstinline|free| statement now
+verifies.
+
+All that is left now is to verify the \lstinline|dispose_tree|
+call in function \lstinline|main|. It needs full permission for
+the tree, i.e.~it needs a \lstinline|tree(tree, _)| chunk.
+Notice that each \lstinline|join_fold_thread| call leaks a
+\lstinline|[1/2]tree(tree, _)| chunk. We need to update the
+annotations of function \lstinline|join_fold_thread| so that it
+returns this chunk to its caller instead of leaking it.
+However, we currently have no way to identify the tree in the
+contract of \lstinline|join_fold_thread|, and a
+\lstinline|[1/2]tree(_, _)| chunk would not help us, since we
+would not know in \lstinline|main| that the chunk pertains to
+the specific tree that we are disposing.
+
+To solve this problem, notice that the tree is pointed to by
+field \lstinline|data->tree| in the pre-state of function
+\lstinline|join_fold_thread|. However, we cannot mention this
+field in function \lstinline|join_fold_thread|'s precondition
+since we have passed full permission for this field to the
+folder thread.
+
+The solution is to pass only a fraction of the permission for
+field \lstinline|data->tree| to the fold thread, and to retain
+the remaining fraction in the main thread. To do so, update the
+\lstinline|thread_run_pre| and \lstinline|thread_run_post|
+predicate family instances, as well as the contracts of
+functions \lstinline|start_fold_thread| and
+\lstinline|join_fold_thread|:
+\begin{lstlisting}
+predicate_family_instance thread_run_pre(folder)(struct fold_data *data, any info) =
+    [1/2]data->tree |-> ?tree &*& [1/2]tree(tree, _) &*&
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+predicate_family_instance thread_run_post(folder)(struct fold_data *data, any info) =
+    [1/2]data->tree |-> ?tree &*& [1/2]tree(tree, _) &*&
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+
+struct fold_data *start_fold_thread(struct tree *tree, fold_function *f, int acc)
+    //@ requires [1/2]tree(tree, _) &*& is_fold_function(f) == true;
+    /*@
+    ensures
+        [1/2]result->tree |-> tree &*& result->thread |-> ?t &*&
+        thread(t, folder, result, _) &*& malloc_block_fold_data(result);
+    @*/
+int join_fold_thread(struct fold_data *data)
+    /*@
+    requires
+        [1/2]data->tree |-> ?tree &*& data->thread |-> ?t &*&
+        thread(t, folder, data, _) &*& malloc_block_fold_data(data);
+    @*/
+    //@ ensures [1/2]tree(tree, _);
+\end{lstlisting}
+We can now specify the \lstinline|[1/2]tree(tree, _)| chunk in
+the postcondition of function \lstinline|join_fold_thread|.
+
+Notice that we now have two \lstinline|[1/2]tree(tree, _)|
+chunks in function \lstinline|main| at the
+\lstinline|dispose_tree| call. We have two half chunks, and we
+need one full chunk; why does VeriFast not simply merge the two
+halves?
+
+The reason is that merging two fractional chunks into a single
+chunk is not always a sound (i.e., safe) thing to do. For
+example, the following program verifies:
+\begin{lstlisting}
+/*@
+
+predicate foo(bool b) = true;
+
+predicate bar(int *x, int *y) = foo(?b) &*& b ? integer(x, _) : integer(y, _);
+
+lemma void merge_bar() // This lemma is false!!
+    requires [?f1]bar(?x, ?y) &*& [?f2]bar(x, y);
+    ensures [f1 + f2]bar(x, y);
+{
+    assume(false);
+}
+
+@*/
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    int x, y;
+    //@ close [1/2]foo(true);
+    //@ close [1/2]bar(&x, &y);
+    //@ close [1/2]foo(false);
+    //@ close [1/2]bar(&x, &y);
+    //@ merge_bar();
+    //@ open bar(&x, &y);
+    //@ assert foo(?b);
+    //@ if (b) integer_unique(&x); else integer_unique(&y);
+    assert(false);
+}
+\end{lstlisting}
+This program demonstrates that assuming that any two fractions
+of a given chunk can be merged into a single chunk, leads to
+unsoundness (i.e.~a program that raises an assertion failure at
+run time verifies successfully). It uses the following lemma
+from \lstinline|prelude.h|:
+\begin{lstlisting}
+lemma void integer_unique(int *p);
+    requires [?f]integer(p, ?v);
+    ensures [f]integer(p, v) &*& f <= 1;
+\end{lstlisting}
+
+The problem is that the two \lstinline|[1/2]bar(&x, &y)| chunks
+do not represent the same memory region: one represents
+\lstinline|[1/2]integer(&x, _)| and the other one represents
+\lstinline|[1/2]integer(&y, _)|. Combining them yields neither
+\lstinline|integer(&x, _)| nor \lstinline|integer(&y, _)|.
+
+However, merging two fractions is sound if both fractions
+represent the same memory region. To support this, VeriFast
+supports the notion of \emph{precise predicates}: you can
+declare a predicate as \emph{precise} by writing a semicolon
+instead of a comma between the \emph{input parameters} and the
+\emph{output parameters} in the predicate's parameter list. For
+such a predicate, VeriFast checks that two chunks with the same
+input arguments represent the same memory region and always
+have the same output arguments. VeriFast automatically merges
+fractions of precise predicates that have the same input
+arguments.
+
+For example, predicate \lstinline|integer| itself is a precise
+predicate; it is declared in \lstinline|prelude.h| as follows:
+\begin{lstlisting}
+predicate integer(int *p; int v);
+\end{lstlisting}
+This declaration specifies that predicate \lstinline|integer|
+is precise and has one input parameter \lstinline|p| and one
+output parameter \lstinline|v|. When VeriFast detects two
+chunks \lstinline|[f1]integer(p1, v1)| and
+\lstinline|[f2]integer(p2, v2)| and it can prove that
+\lstinline|p1| equals \lstinline|p2|, then it merges the chunks
+into a single chunk \lstinline|[f1 + f2]integer(p1, v1)| and it
+produces the assumption that \lstinline|v1| equals
+\lstinline|v2|.
+
+In conclusion, to verify our example program, we need to
+declare predicate \lstinline|tree| as precise:
+\begin{lstlisting}
+predicate tree(struct tree *t; int depth) =
+    t == 0 ?
+        depth == 0
+    :
+        t->left |-> ?left &*& t->right |-> ?right &*& t->value |-> _ &*& malloc_block_tree(t) &*&
+        tree(left, ?childDepth) &*& tree(right, childDepth) &*& depth == childDepth + 1;
+\end{lstlisting}
+Notice that we rephrased the body of the predicate slightly so
+that it is accepted by VeriFast's preciseness analysis. The
+program now verifies.
+
+The preciseness analysis checks that the body of the predicate
+is precise under the input parameters and fixes the output
+parameters. The rules for the various forms of assertions being
+precise under a set of fixed variables $X$ are as follows:
+\begin{itemize}
+\item A predicate assertion is precise under $X$ if the
+    predicate is precise and the input arguments are fixed
+    by $X$; it fixes any variables that appear as output
+    arguments. For example, for assertion %
+    \lstinline|p(x + y, z)| to be considered precise,
+    \lstinline|p| must be a precise predicate. Furthermore,
+    suppose it has one input parameter. Then \lstinline|x|
+    and \lstinline|y| must be in $X$, and the assertion
+    fixes \lstinline|z|.
+\item A fractional assertion is precise under $X$ if the
+    coefficient is fixed by $X$ or it is a dummy pattern
+    and the body is precise under $X$; it fixes any
+    variables fixed by its body.
+\item A boolean assertion is always precise under any $X$.
+    It does not fix any variables, unless it is an equality
+    and the left-hand side is a variable and the right-hand
+    side is fixed by $X$; in that case, it fixes the
+    variable on the left-hand side.
+\item A conditional assertion is precise under $X$ if the
+    condition is fixed by $X$ and each branch is precise
+    under $X$; the fixed variables are the variables that
+    are fixed by all branches.
+\item Similarly, a \lstinline|switch| assertion is precise
+    under $X$ if its operand is fixed by $X$ and each
+    branch is precise under the union of $X$ and the
+    constructor arguments; the fixed variables are the
+    variables that are fixed by all branches.
+\item A separating conjunction is precise under $X$ if its
+    first operand is precise under $X$, and its second
+    operand is precise under the union of $X$ and the
+    variables fixed by the first operand. It fixes the
+    variables fixed by either operand.
+\end{itemize}
+That is, the analysis traverses the assertion from left to
+right, tracking the set of fixed variables. Input arguments of
+nested predicate assertions and branch conditions must depend
+only on variables that are already fixed; variables that appear
+as output arguments of nested predicate assertions or on the
+left-hand side of equalities whose right-hand side is fixed are
+added to the set of fixed variables.
+
+\section{Auto-open/close}\label{section:auto-open-close}
+
+In the preceding section, we introduced VeriFast's support for
+precise predicates so that we could merge fractions of the same
+chunk. However, declaring a predicate as precise has another
+advantage: it enables VeriFast's logic for automatically
+opening and closing the predicate. This cuts down on the number
+of \lstinline|open| and \lstinline|close| commands that you
+need to write explicitly.
+
+Specifically, when VeriFast is consuming a predicate assertion,
+and no matching chunk exists in the symbolic heap, but the
+predicate is precise and all input arguments are specified in
+the assertion, then auto-open or auto-close is attempted.
+Auto-close is performed if a chunk that appears in the body of
+the predicate is found in the symbolic heap; auto-open is
+performed if the desired chunk appears in the body of some
+chunk that appears in the symbolic heap.
+
+For example, in the program of the preceding section this
+allows us to remove all ghost commands for opening or closing
+\lstinline|tree| chunks.
 
 \section{Mutexes}\label{section:mutexes}
 

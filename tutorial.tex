@@ -2171,8 +2171,7 @@ Verify the program.
 
 Consider the following program that walks a binary tree of
 integers, computes the faculty of the value of each node, sums
-up the results, and returns it as the exit code of the process.
-(Note: The latter is not recommended practice.)
+up the results, and prints the sum to the console.
 \begin{lstlisting}
 int rand();
 
@@ -2226,7 +2225,8 @@ int main()
 {
     struct tree *tree = make_tree(22);
     int sum = tree_compute_sum_facs(tree);
-    return sum;
+    printf("%i", sum);
+    return 0;
 }
 \end{lstlisting}
 
@@ -2319,7 +2319,8 @@ int main()
     int sumLeft = join_sum_thread(leftData);
     int sumRight = join_sum_thread(rightData);
     int f = fac(tree->value);
-    return sumLeft + sumRight + f;
+    printf("%i", sumLeft + sumRight + f);
+    return 0;
 }
 \end{lstlisting}
 The main program creates a tree of depth 22. It then starts two
@@ -2483,7 +2484,8 @@ int main()
     int sumRight = join_fold_thread(rightData);
     int f = fac(tree->value);
     //@ leak tree->left |-> _ &*& tree->right |-> _ &*& tree->value |-> _ &*& malloc_block_tree(tree);
-    return sumLeft + sumRight + f;
+    printf("%i", sumLeft + sumRight + f);
+    return 0;
 }
 \end{lstlisting}
 
@@ -2514,7 +2516,8 @@ int main()
     struct fold_data *productData = start_fold_thread(tree, product_function, 1);
     int sum = join_fold_thread(sumData);
     int product = join_fold_thread(productData);
-    return product - sum;
+    printf("%i", product - sum);
+    return 0;
 }
 \end{lstlisting}
 
@@ -2615,7 +2618,8 @@ int main()
     int sum = join_fold_thread(sumData);
     int product = join_fold_thread(productData);
     dispose_tree(tree);
-    return product - sum;
+    printf("%i", product - sum);
+    return 0;
 }
 \end{lstlisting}
 

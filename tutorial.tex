@@ -3818,14 +3818,18 @@ int memcmp(char *p1, char *p2, int count) {
 
 \section{Strings}\label{section:strings}
 
-In C programs, strings are conventionally stored in memory as \emph{zero-terminated} character sequences. For example, the string
-\lstinline!"Hello"! is stored as \lstinline!'H'!,\lstinline!'e'!,\lstinline!'l'!, \lstinline!'l'!, \lstinline!'o'!, \lstinline!0!. This means a function
-that computes the length of a string could be written as follows:
+In C programs, strings are conventionally stored in memory as
+\emph{zero-terminated} character sequences. For example, the
+string \lstinline!"Hello"! is stored as
+\lstinline!'H'!,\lstinline!'e'!,\lstinline!'l'!,
+\lstinline!'l'!, \lstinline!'o'!, \lstinline!0!. This means a
+function that computes the length of a string could be written
+as follows:
 \begin{lstlisting}
 int strlen(char *s) {
-    char *c = s;
-    while (*c != 0) { c++; }
-    return c - s;
+    int i = 0;
+    for (; s[i] != 0; i++);
+    return i;
 }
 \end{lstlisting}
 Here is a simple main program that uses this function:
@@ -3839,48 +3843,59 @@ int main() {
 
 How do we verify this function and this main program?
 
-The precondition of function \lstinline!strlen! must specify that the caller must supply sufficient permissions to access all locations starting at
-address \lstinline!s!, up to and including the first location after \lstinline!s! whose value is zero. Can we do this using the \lstinline!characters!
-predicate of the previous sections? No, we cannot, since if we use this predicate, we cannot talk about the values of the characters.
-
-One approach for specifying function \lstinline!strlen! is to modify predicate \lstinline!characters! so that it has a list of character values as its
-second argument instead of just a count of the number of characters. Such a predicate is in fact built into VeriFast: it is called \lstinline!chars! and it
-is declared in the built-in header file \lstinline!prelude.h! as follows:
+The precondition of function \lstinline!strlen! must specify
+that the caller must supply sufficient permissions to access
+all locations starting at address \lstinline!s!, up to and
+including the first location after \lstinline!s! whose value is
+zero. We could do this using the \lstinline!chars! predicate
+introduced in the previous section, but it is more elegant to
+define a new predicate for this specific purpose:
 \begin{lstlisting}
-predicate chars(char *array, list<char> cs) =
-    switch (cs) {
-        case nil: return true;
-        case cons(c, cs0): return character(array, c) &*& chars(array + 1, cs0);
-    };
+predicate string(char *s; list<char> cs) =
+    character(s, ?c) &*&
+    c == 0 ?
+        cs == nil
+    :
+        string(s + 1, ?cs0) &*& cs == cons(c, cs0);
 \end{lstlisting}
 Using this predicate, we can specify function \lstinline!strlen! as follows:
 \begin{lstlisting}
 int strlen(char *s)
-    //@ requires chars(s, ?cs) &*& mem('\0', cs) == true;
-    //@ ensures chars(s, cs) &*& result == index_of('\0', cs);
+    //@ requires string(s, ?cs);
+    //@ ensures string(s, cs) &*& result == length(cs);
 \end{lstlisting}
-We are using the fixpoint functions \lstinline!mem! and \lstinline!index_of! defined in the built-in header file \lstinline!list.h!. Function
-\lstinline!mem(x, xs)! returns \lstinline!true! if \lstinline!x! is an element of the list \lstinline!xs! and \lstinline!false! otherwise.
-Function \lstinline!index_of(x, xs)! returns the index of the first occurrence of \lstinline!x! in list \lstinline!xs!, or \lstinline!-1! if \lstinline!x!
-does not occur in \lstinline!xs!.
-
 Given this specification, the function is easy to verify.
 
-Let's now attempt to verify the main program. Unfortunately, this fails. The reason is that the precondition of function \lstinline!strlen! requires full
-permission for the string, i.e. permission to read and modify the string's characters. However, a C string literal is \emph{immutable}; the program must
-not modify it. VeriFast reflects this by generating only a \emph{fractional permission} for the string literal (see Section~\ref{section:fractions}).
+In fact, the \lstinline|string| predicate is the ``official''
+predicate for zero-terminated strings in VeriFast: it is
+declared in \lstinline|prelude.h| along with a number of useful
+lemmas, and VeriFast produces a \lstinline|string| chunk when a
+string literal expression is evaluated.
 
-However, fortunately, function \lstinline!strlen! does not actually modify the string that it operates on, so we can weaken its contract so that it requires
-only a fractional permission:
+Let's now attempt to verify the main program. Unfortunately,
+this fails. The reason is that the above precondition of
+function \lstinline!strlen! requires full permission for the
+string, i.e. permission to read and modify the string's
+characters. However, a C string literal is \emph{immutable};
+the program must not modify it. VeriFast reflects this by
+generating only a \emph{fractional permission} for the string
+literal (see Section~\ref{section:fractions}).
+
+However, fortunately, function \lstinline!strlen! does not
+actually modify the string that it operates on, so we can
+weaken its contract so that it requires only a fractional
+permission:
 \begin{lstlisting}
 int strlen(char *s)
-    //@ requires [?f]chars(s, ?cs) &*& mem('\0', cs) == true;
-    //@ ensures [f]chars(s, cs) &*& result == index_of('\0', cs);
+    //@ requires [?f]string(s, ?cs);
+    //@ ensures [f]string(s, cs) &*& result == length(cs);
 \end{lstlisting}
 
 \begin{exercise}\label{exercise:strlen}
-Verify function \lstinline!strlen! and the main program. Use a loop contract (see Section~\ref{section:recursive-loop-proofs}) to verify the loop.
-Note that you'll need to move the loop condition into the body of the loop.
+Verify function \lstinline!strlen! and the main program. Use a
+loop contract (see Section~\ref{section:recursive-loop-proofs})
+to verify the loop. Note that you'll need to move the loop
+condition into the body of the loop.
 \end{exercise}
 
 \section{Solutions to Exercises}
@@ -5659,40 +5674,6 @@ int stack_get_count(struct stack *stack)
 }
 \end{lstlisting}
 
-\subsection{Exercise \ref{exercise:strlen}: strlen.c}\label{solution:strlen}
-
-\begin{lstlisting}
-int strlen(char *s)
-    //@ requires [?f]chars(s, ?cs) &*& mem('\0', cs) == true;
-    //@ ensures [f]chars(s, cs) &*& result == index_of('\0', cs);
-{
-    char *c = s;
-    for (;;)
-        //@ requires [f]chars(c, ?cs1) &*& mem('\0', cs1) == true;
-        //@ ensures [f]chars(old_c, cs1) &*& c - old_c == index_of('\0', cs1);
-    {
-        //@ open [f]chars(c, cs1);
-        if (*c == 0) {
-            //@ close [f]chars(c, cs1);
-            break;
-        }
-        c++;
-        //@ recursive_call();
-        //@ close [f]chars(old_c, cs1);
-    }
-    return c - s;
-}
-
-int main()
-    //@ requires true;
-    //@ ensures true;
-{
-    int n = strlen("Hello, world!");
-    assert(n == 13);
-    return 0;
-}
-\end{lstlisting}
-
 \subsection{Exercise \ref{exercise:memcmp}:
 memcmp.c}\label{solution:memcmp}
 
@@ -5730,5 +5711,36 @@ int memcmp(char *p1, char *p2, int count)
     }
     return result;
 }\end{lstlisting}
+
+\subsection{Exercise \ref{exercise:strlen}: strlen.c}\label{solution:strlen}
+
+\begin{lstlisting}
+int strlen(char *s)
+    //@ requires [?f]string(s, ?cs);
+    //@ ensures [f]string(s, cs) &*& result == length(cs);
+{
+    int i = 0;
+    for (;; i++)
+        //@ requires [f]string(s + i, ?cs1);
+        //@ ensures [f]string(s + old_i, cs1) &*& i == old_i + length(cs1);
+    {
+        //@ open [f]string(s + i, cs1);
+        if (s[i] == 0) {
+            //@ close [f]string(s + i, cs1);
+            break;
+        }
+    }
+    return i;
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    int n = strlen("Hello, world!");
+    assert(n == 13);
+    return 0;
+}
+\end{lstlisting}
 
 \end{document}

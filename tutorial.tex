@@ -3681,6 +3681,141 @@ loop into a \lstinline!for (;;)! loop (or, equivalently, a \lstinline!while (tru
 command before exiting the loop.
 \end{exercise}
 
+\section{Tracking Array Contents}\label{section:memcpy}
+
+Suppose we wish to verify functional correctness of the
+following implementation of the \lstinline|memcpy| function,
+which copies the contents of one character array into another
+one.
+
+\begin{lstlisting}
+void memcpy(char *dest, char *src, int count) {
+    for (int i = 0; i < count; i++) {
+        dest[i] = src[i];
+    }
+}
+\end{lstlisting}
+
+To specify functional correctness, the contract for
+\lstinline|memcpy| must express that when the function returns,
+the contents of the \lstinline|dest| array are equal to the
+contents of the \lstinline|src| array. This means that we
+cannot use the \lstinline|characters| predicate from the
+preceding sections, since that predicate specifies only the
+size of a character array, and not its contents. We must add a
+predicate parameter that specifies the list of characters held
+by the array:
+\begin{lstlisting}
+predicate chars(char *array, int count; list<char> cs) =
+    count == 0 ?
+        cs == nil
+    :
+        character(array, ?c) &*& chars(array + 1, count - 1, ?cs0) &*& cs == cons(c, cs0);
+\end{lstlisting}
+We can use this predicate to fully specify the behavior of the
+\lstinline|memcpy| function as follows:
+\begin{lstlisting}
+void memcpy(char *dest, char *src, int count)
+    //@ requires chars(dest, count, _) &*& [?f]chars(src, count, ?cs);
+    //@ ensures chars(dest, count, cs) &*& [f]chars(src, count, cs);
+\end{lstlisting}
+This predicate is in fact the ``official'' character array
+predicate in VeriFast: it is declared in \lstinline|prelude.h|,
+along with a number of useful lemmas, and it is used by
+VeriFast for certain purposes. For example, the following
+function verifies given the above contract for
+\lstinline|memcpy|:
+\begin{lstlisting}
+void test()
+    //@ requires true;
+    //@ ensures true;
+{
+    char buffer1[7] = "Hello!";
+    char buffer2[7];
+    memcpy(buffer2, buffer1, 7);
+    assert(buffer2[5] == '!');
+}
+\end{lstlisting}
+Indeed, declaring a local character array causes VeriFast to
+produce a \lstinline|chars| chunk.
+
+Notice the semicolon in the definition of predicate
+\lstinline|chars|: this means it is declared as precise with
+two input parameters (\lstinline|array| and \lstinline|count|)
+and one output parameter (\lstinline|cs|). As explained in
+Sections~\ref{section:precise} and
+\ref{section:auto-open-close}, it follows that VeriFast will
+merge \lstinline|chars| fractions and automatically
+\lstinline|open| and \lstinline|close| \lstinline|chars| chunks
+in certain circumstances.
+
+VeriFast supports \emph{array slice syntax} to improve the
+readability of assertions about \lstinline|chars| chunks. The
+notation \lstinline$a[i..n] |-> ?vs$ where \lstinline|a| is of
+type \lstinline|char *| is equivalent to %
+\lstinline$chars(a + i, n - i, ?vs)$. Using array slice syntax,
+we can write the contract of function \lstinline|memcpy|
+somewhat more readably as follows:
+\begin{lstlisting}
+void memcpy(char *dest, char *src, int count)
+    //@ requires dest[0..count] |-> _ &*& [?f]src[0..count] |-> ?cs;
+    //@ ensures dest[0..count] |-> cs &*& [f]src[0..count] |-> cs;
+\end{lstlisting}
+
+We can now verify the implementation. As so often when working
+with arrays, it pays off to use loop contracts instead of loop
+invariants (see Section~\ref{section:recursive-loop-proofs}).
+\begin{lstlisting}
+void memcpy(char *dest, char *src, int count)
+    //@ requires dest[0..count] |-> _ &*& [?f]src[0..count] |-> ?cs;
+    //@ ensures dest[0..count] |-> cs &*& [f]src[0..count] |-> cs;
+{
+    for (int i = 0; ; i++)
+        //@ requires dest[i..count] |-> _ &*& [f]src[i..count] |-> ?cs0;
+        //@ ensures dest[old_i..count] |-> cs0 &*& [f]src[old_i..count] |-> cs0;
+    {
+        //@ open chars(dest + i, _, _);
+        //@ open chars(src + i, _, _);
+        if (i == count) {
+            //@ close [f]chars(src + i, 0, _);
+            break;
+        }
+        dest[i] = src[i];
+    }
+}
+\end{lstlisting}
+Notice that, as usual when using loop contracts, we had to move
+the loop condition into the loop body so that we could insert
+ghost commands before the loop exit (i.e., the
+\lstinline|break| statement).
+
+\begin{exercise}\label{exercise:memcmp}
+Specify and verify that the following implementation of
+function \lstinline|memcmp| returns zero if and only if the two
+arrays have the same contents. Note: if a boolean expression in
+an assertion starts with a parenthesis, you must prefix the
+boolean expression with \lstinline|true ==|, e.g.
+\lstinline|true == ((a == b) == (c == d))|; this is a
+limitation of the VeriFast parser.
+\begin{lstlisting}
+int memcmp(char *p1, char *p2, int count) {
+    int result = 0;
+    for (int i = 0; ; i++) {
+        if (i == count) {
+            break;
+        }
+        if (p1[i] < p2[i]) {
+            result = -1; break;
+        }
+        if (p1[i] > p2[i]) {
+            result = 1; break;
+        }
+    }
+    return result;
+}
+\end{lstlisting}
+\end{exercise}
+
 \section{Strings}\label{section:strings}
 
 In C programs, strings are conventionally stored in memory as \emph{zero-terminated} character sequences. For example, the string
@@ -5557,5 +5692,43 @@ int main()
     return 0;
 }
 \end{lstlisting}
+
+\subsection{Exercise \ref{exercise:memcmp}:
+memcmp.c}\label{solution:memcmp}
+
+\begin{lstlisting}
+int memcmp(char *p1, char *p2, int count)
+    //@ requires [?f1]p1[0..count] |-> ?cs1 &*& [?f2]p2[0..count] |-> ?cs2;
+    /*@
+    ensures
+        [f1]p1[0..count] |-> cs1 &*& [f2]p2[0..count] |-> cs2 &*&
+        true == ((result == 0) == (cs1 == cs2));
+    @*/
+{
+    int result = 0;
+    for (int i = 0; ; i++)
+        //@ requires [f1]p1[i..count] |-> ?xs1 &*& [f2]p2[i..count] |-> ?xs2 &*& result == 0;
+        /*@
+        ensures
+            [f1]p1[old_i..count] |-> xs1 &*& [f2]p2[old_i..count] |-> xs2 &*&
+            true == ((result == 0) == (xs1 == xs2));
+        @*/
+    {
+        //@ open chars(p1 + i, _, _);
+        //@ open chars(p2 + i, _, _);
+        if (i == count) {
+            //@ close [f1]chars(p1 + i, 0, _);
+            //@ close [f2]chars(p2 + i, 0, _);
+            break;
+        }
+        if (p1[i] < p2[i]) {
+            result = -1; break;
+        }
+        if (p1[i] > p2[i]) {
+            result = 1; break;
+        }
+    }
+    return result;
+}\end{lstlisting}
 
 \end{document}

@@ -3777,7 +3777,6 @@ void memcpy(char *dest, char *src, int count)
         //@ open chars(dest + i, _, _);
         //@ open chars(src + i, _, _);
         if (i == count) {
-            //@ close [f]chars(src + i, 0, _);
             break;
         }
         dest[i] = src[i];
@@ -3896,6 +3895,324 @@ Verify function \lstinline!strlen! and the main program. Use a
 loop contract (see Section~\ref{section:recursive-loop-proofs})
 to verify the loop. Note that you'll need to move the loop
 condition into the body of the loop.
+\end{exercise}
+
+\section{Arrays of Pointers}\label{section:arrays-of-pointers}
+
+The previous section introduced VeriFast's support for arrays
+of characters. Similar support exists for arrays of unsigned
+characters, integers, unsigned integers, and pointers. In this
+section, we will use VeriFast's support for arrays of pointers
+to verify memory safety of a very simple application for
+keeping track of the names of students in a class. The
+following program reads a list of student names, and then
+allows the user to look up the name of the $k$th student in
+constant time. When the user enters an invalid student number,
+the program deallocates all allocated memory and terminates.
+\begin{lstlisting}
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+int read_int() {
+    int x;
+    int scanf_result = scanf("%i", &x);
+    if (scanf_result < 1) abort();
+    return x;
+}
+
+char *read_line() {
+    char buffer[100];
+    int scanf_result = scanf(" %99[^\n]", buffer);
+    if (scanf_result < 1) abort();
+    char *result = strdup(buffer);
+    if (result == 0) abort();
+    return result;
+}
+
+int main() {
+    printf("How many students do you have? ");
+    int n = read_int();
+    if (n < 0 || 0x20000000 <= n) abort();
+    char **names = malloc(n * sizeof(char **));
+    if (names == 0) abort();
+    for (int i = 0; i != n; i++) {
+        printf("Please enter the name of student number %d: ", i + 1);
+        char *name = read_line();
+        printf("Adding '%s'...\n", name);
+        names[i] = name;
+    }
+
+    for (;;) {
+        printf("Please enter a student number: ");
+        int k = read_int();
+        if (k < 1 || n < k) {
+            printf("Student number out of range. Terminating...\n");
+            break;
+        } else {
+            char *name = names[k - 1];
+            printf("Student number %d is called %s.\n", k, name);
+        }
+    }
+
+    for (int i = 0; i != n; i++) {
+        free(names[i]);
+    }
+    free(names);
+
+    return 0;
+}
+\end{lstlisting}
+Helper function \lstinline!read_int! uses the standard C
+library function \lstinline!scanf! (declared in header file
+\lstinline!stdio.h!) to read an integer value (in decimal or
+hexadecimal notation) from standard input and store it in
+variable \lstinline!x!. Similarly, helper function
+\lstinline!read_line! uses \lstinline!scanf! to read a sequence
+of up to 99 characters that are not newline characters, i.e., a
+single line of text of at most 99 characters, and store it in
+character array \lstinline!buffer! (allocated on the stack).
+The return value of \lstinline!scanf! indicates the number of
+items successfully read. Then, \lstinline!read_line! uses
+library function \lstinline!strdup! (from the POSIX standard,
+declared in header file \lstinline!string.h!) to copy the
+zero-terminated string in \lstinline!buffer! to a newly
+heap-allocated memory block. \lstinline!strdup! returns 0 if
+the operation fails due to insufficient memory.
+
+Verification of function \lstinline!read_int! is trivial.
+Verification of function \lstinline!read_line! involves one
+difficulty: after the \lstinline!scanf! call, array
+\lstinline!buffer! is described by a \lstinline!chars! chunk,
+but function \lstinline!strdup! requires a \lstinline!string!
+chunk. Fortunately, we can extract a \lstinline!string! chunk
+out of any character array that contains a zero character using
+lemma \lstinline!chars_separate_string! declared in
+\lstinline!prelude.h!. Since the array must again be available
+as a \lstinline!chars! chunk when function
+\lstinline!read_line! returns, we must call the companion lemma
+\lstinline!chars_unseparate_string! after the
+\lstinline!strdup! call to merge the \lstinline!string! chunk
+back into the \lstinline!chars! chunk.
+
+In the main function, verification requires that we annotate
+each of the three loops. Let's focus on the first loop. Since
+it traverses the \lstinline!names! array front to back, we will
+use a loop contract. The loop requires access to the array; how
+do we specify this? How does VeriFast represent the array
+allocated by the \lstinline!malloc! statement? In fact, if a
+\lstinline!malloc! call is of the form %
+\lstinline!T **x = malloc(n * sizeof(T *))!, VeriFast produces
+a \lstinline!pointers(x, n, _)! chunk. Predicate
+\lstinline!pointers! is defined in \lstinline!prelude.h! and is
+analogous to predicate \lstinline!chars! (see
+Section~\ref{section:memcpy}):
+\begin{lstlisting}
+predicate pointers(void **pp, int count; list<void *> ps) =
+    count == 0 ?
+        ps == nil
+    :
+        pointer(pp, ?p) &*& pointers(pp + 1, count - 1, ?ps0) &*& ps == cons(p, ps0);
+\end{lstlisting}
+Like for \lstinline!chars! chunks, VeriFast supports array
+slice syntax for \lstinline!pointers! chunks: the notation
+\lstinline!a[i..n] |->! \lstinline!?ps! where \lstinline!a! is
+of type
+\lstinline!T **! is equivalent to %
+\lstinline!pointers(a + i, n - i, ?ps)!. A suitable
+precondition for the first loop in function \lstinline!main! is
+therefore as follows:
+\begin{lstlisting}
+//@ requires names[i..n] |-> _;
+\end{lstlisting}
+
+This loop stores in each element of array \lstinline!names! a
+pointer to a heap-allocated memory block containing a
+zero-terminated string. The postcondition of the loop should
+therefore specify not just the array itself but these memory
+blocks as well. As discussed in Section~\ref{section:predvals},
+we can specify the presence of a chunk for each element of a
+list using predicate \lstinline!foreach!. A reasonable
+postcondition for the loop would therefore be:
+\begin{lstlisting}
+//@ ensures names[old_i..n] |-> ?ps &*& foreach(ps, student);
+\end{lstlisting}
+where predicate \lstinline!student! is defined as
+\begin{lstlisting}
+predicate student(char *name) = string(name, ?cs) &*& malloc_block_chars(name, length(cs) + 1);
+\end{lstlisting}
+(Note: allocating an array \lstinline!a! of \lstinline!n!
+characters produces a \lstinline!malloc_block_chars(a, n)!
+chunk; similarly, allocating an array \lstinline!a! of
+\lstinline!n! pointers produces a
+\lstinline!malloc_block_pointers(a, n)! chunk.) The above
+postcondition would work, but we can reduce the number of
+\lstinline!open! and \lstinline!close! statements required to
+work with these chunks by using precise variants (see
+Section~\ref{section:auto-open-close}). We can declare
+predicate \lstinline!student! as precise as follows:
+\begin{lstlisting}
+predicate student(char *name;) = string(name, ?cs) &*& malloc_block_chars(name, length(cs) + 1);
+\end{lstlisting}
+VeriFast comes with a \emph{ghost header file}
+\lstinline!listex.gh! (to be included using a ghost include
+directive \lstinline!//@! \lstinline!#include <listex.gh>!)
+that declares a precise variant of predicate
+\lstinline!foreach!, called \lstinline!foreachp!:
+\begin{lstlisting}
+predicate foreachp<t>(list<t> xs, predicate(t;) p;) =
+    xs == nil ?
+        emp
+    :
+        xs == cons(head(xs), tail(xs)) &*& p(head(xs)) &*& foreachp(tail(xs), p);
+\end{lstlisting}
+Using these precise predicates, we get the following
+postcondition for the first loop:
+\begin{lstlisting}
+//@ ensures names[old_i..n] |-> ?ps &*& foreachp(ps, student);
+\end{lstlisting}
+The body of the first loop now verifies without any
+annotations... almost. VeriFast does not realize that if
+\lstinline!i == n!, then \lstinline!ps == nil!. This causes
+verification of the path that exits the loop to fail. We need
+to force a case split by moving the loop condition into the
+loop body and inserting an \lstinline!open! statement at the
+top of the body:
+\begin{lstlisting}
+for (int i = 0; ; i++)
+    //@ requires names[i..n] |-> _;
+    //@ ensures names[old_i..n] |-> ?ps &*& foreachp(ps, student);
+{
+    //@ open pointers(_, _, _);
+    if (i == n) {
+        break;
+    }
+    printf("Please enter the name of student number %d: ", i + 1);
+    char *name = read_line();
+    printf("Adding '%s'...\n", name);
+    names[i] = name;
+}
+\end{lstlisting}
+The first loop now verifies.
+
+The second loop differs from the first one in that it does not
+traverse the loop linearly; rather, it performs random access.
+Therefore, we use an ordinary loop invariant:
+\begin{lstlisting}
+//@ invariant names[0..n] |-> ?ps &*& foreachp(ps, student);
+\end{lstlisting}
+In the first loop, the array element access
+\lstinline!names[i]! caused an auto-open of the
+\lstinline!pointers(names + i, n - i,! \lstinline!_)! chunk,
+laying bare the \lstinline!pointer(names + i, _)! chunk
+required by the element access (see
+Section~\ref{section:byref-params}). In the second loop, the
+\lstinline!names[k - 1]! access cannot be verified in this way,
+since the required \lstinline!pointer! chunk is in the middle
+of the \lstinline!pointers! chunk, rather than in the front; it
+would require \lstinline!k! \lstinline!open! operations to lay
+it bare, and the auto-open feature cannot handle this. However,
+the access verifies anyway, because VeriFast recognizes this
+access as a random access and treats it specially. In
+particular, if, when evaluating an array access of the form
+\lstinline!a[i]!, VeriFast finds a chunk %
+\lstinline!pointers(a, n, ps)! such that %
+\lstinline!0 <= i < n!, it considers the access to be valid and
+returns \lstinline!nth(i, ps)! as the result of the access. The
+fixpoint function \lstinline!nth! is declared in header file
+\lstinline!list.h!; \lstinline!nth(i, ps)! returns the
+\lstinline!i!'th element of the list \lstinline!ps!.
+
+This deals with the array access itself, but there is another
+problem: the \lstinline!printf! call requires the
+\lstinline!string! chunk for the string pointed to by element
+\lstinline!k - 1!. This chunk is inside the
+\lstinline!foreachp! chunk. We can extract it using lemma
+\lstinline!foreachp_remove_nth! declared in ghost header
+\lstinline!listex.gh!:
+\begin{lstlisting}
+lemma void foreachp_remove_nth<t>(int n);
+    requires foreachp<t>(?xs, ?p) &*& 0 <= n &*& n < length(xs);
+    ensures foreachp<t>(remove_nth(n, xs), p) &*& p(nth(n, xs));
+\end{lstlisting}
+It uses the fixpoint function \lstinline!remove_nth! declared
+in \lstinline!list.h!.
+
+Once the \lstinline!student! chunk for element %
+\lstinline!k - 1! is available, it is auto-opened and the
+\lstinline!printf! call verifies. After the \lstinline!printf!
+call, we need to merge the \lstinline!student! chunk back into
+the \lstinline!foreachp! chunk using the companion lemma
+\lstinline!foreachp_unremove_nth!:
+\begin{lstlisting}
+lemma void foreachp_unremove_nth<t>(list<t> xs, int n);
+    requires foreachp<t>(remove_nth(n, xs), ?p) &*& 0 <= n &*& n < length(xs) &*& p(nth(n, xs));
+    ensures foreachp<t>(xs, p);
+\end{lstlisting}
+These two lemma calls are the only annotations required to
+verify the body of the second loop.
+
+The third loop again traverses the loop front to back; a loop
+spec is indicated. Since the loop deallocates the memory blocks
+holding the student names, the \lstinline!foreachp! chunk
+disappears from the postcondition:
+\begin{lstlisting}
+//@ requires names[i..n] |-> ?ps &*& foreachp(ps, student);
+//@ ensures names[old_i..n] |-> _;
+\end{lstlisting}
+Verifying the body of the loop requires a few annotations.
+Firstly, on the path that exits the loop, we get a leak error,
+again because VeriFast does not realize that \lstinline!i == n!
+means that \lstinline!ps == nil!. Like in the first loop, we
+need to move the loop condition into the loop body and insert
+an explicit \lstinline!open! of the \lstinline!pointers! chunk.
+
+The second problem is that the \lstinline!free! call is not
+satisfied: a \lstinline!free(a)! call where \lstinline!a! is of
+type \lstinline!char *! looks for a
+\lstinline!malloc_block_chars(a, n)! chunk and a
+\lstinline!chars(a, n, _)! chunk. The
+\lstinline!malloc_block_chars! chunk is available inside the
+\lstinline!foreachp! chunk, but the \lstinline!chars! chunk is
+not; the memory block is instead described by a
+\lstinline!string! chunk. Therefore, we need to transform the
+\lstinline!string! chunk into a \lstinline!chars! chunk. A
+lemma \lstinline!string_to_chars! is available for this purpose
+in header \lstinline!prelude.h!. We insert a call of this lemma
+before the \lstinline!free! call.
+
+The third problem is that the \lstinline!string_to_chars! call
+is not satisfied. The \lstinline!string! chunk that it looks
+for can be obtained by opening the \lstinline!foreachp! chunk
+and then opening the resulting \lstinline!student! chunk, but
+the auto-open feature does not see this because the
+\lstinline!student! chunk is not \emph{statically} inside the
+\lstinline!foreachp! chunk; rather, it is inside the
+\lstinline!foreachp! chunk only if its second argument is the
+name of the \lstinline!student! predicate. The auto-open
+feature may support this scenario in the future, but for now we
+need to explicitly open the \lstinline!foreachp! chunk. The
+final proof of the third loop looks as follows:
+\begin{lstlisting}
+for (int i = 0; ; i++)
+    //@ requires names[i..n] |-> ?ps &*& foreachp(ps, student);
+    //@ ensures names[old_i..n] |-> _;
+{
+    //@ open pointers(_, _, _);
+    if (i == n) {
+        break;
+    }
+    //@ open foreachp(_, _);
+    //@ string_to_chars(names[i]);
+    free(names[i]);
+}
+\end{lstlisting}
+
+The program now verifies.
+
+\begin{exercise}
+Verify the program (available as \lstinline!students.c! in
+directory \lstinline!tutorial! of the VeriFast distribution).
 \end{exercise}
 
 \section{Solutions to Exercises}
@@ -5698,8 +6015,6 @@ int memcmp(char *p1, char *p2, int count)
         //@ open chars(p1 + i, _, _);
         //@ open chars(p2 + i, _, _);
         if (i == count) {
-            //@ close [f1]chars(p1 + i, 0, _);
-            //@ close [f2]chars(p2 + i, 0, _);
             break;
         }
         if (p1[i] < p2[i]) {
@@ -5726,7 +6041,6 @@ int strlen(char *s)
     {
         //@ open [f]string(s + i, cs1);
         if (s[i] == 0) {
-            //@ close [f]string(s + i, cs1);
             break;
         }
     }

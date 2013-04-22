@@ -3410,7 +3410,7 @@ int main() /*@ requires true; @*/ /*@ ensures true; @*/
     return 0;
 }
 \end{lstlisting}
-This does'nt quite work yet. The problem is that VeriFast does not automatically replace a \lstinline!characters! chunk with its definition, or vice versa. You need to do this explicitly by inserting
+This doesn't quite work yet. The problem is that VeriFast does not automatically replace a \lstinline!characters! chunk with its definition, or vice versa. You need to do this explicitly by inserting
 \lstinline!open! and \lstinline!close! ghost commands. For example, when you run VeriFast on the above program, VeriFast complains at the assignment to \lstinline!*start! in function
 \lstinline!getchars! because it cannot find a chunk matching \lstinline!character(start, _)!. This chunk is in fact present; it's just that it is hidden inside the \lstinline!characters! chunk. We need to
 open up the \lstinline!characters! chunk so that VeriFast can see the \lstinline!character! chunk that is inside of it.

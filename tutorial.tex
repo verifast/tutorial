@@ -1288,103 +1288,6 @@ functional correctness (see Section~\ref{section:datatypes}).
 You'll need to define additional fixpoints and lemmas.
 \end{exercise}
 
-\section{Arithmetic Overflow}
-
-Consider the following program:
-\begin{lstlisting}
-int main()
-    //@ requires true;
-    //@ ensures true;
-{
-    int x = 2000000000 + 2000000000;
-    assert(0 <= x);
-    return 0;
-}
-\end{lstlisting}
-The behavior of this program is not uniquely defined by the C
-language. Specifically, the \lstinline!int! type supports only
-a finite range of integers, and furthermore the C language does
-not specify the bounds of this range. The bounds are
-\emph{implementation-dependent}. The C language does specify
-that the least and greatest value of type \lstinline!int! are
-given by the macros \lstinline!INT_MIN! and
-\lstinline!INT_MAX!, respectively, and that \lstinline!INT_MIN!
-is not greater than -32767 and that \lstinline!INT_MAX! is not
-less than 32767. Furthermore, the C language does not specify
-what happens if an arithmetic operation on type \lstinline!int!
-yields a value that is not within the limits of type
-\lstinline!int!.
-
-VeriFast does not attempt to be sound with respect to arbitrary
-C implementations (or even with respect to arbitrary
-standard-compliant ones). Specifically, it assumes that
-\lstinline!INT_MIN! equals $-2^{31}$ and \lstinline!INT_MAX!
-equals $2^{31}-1$.
-
-When symbolically evaluating an arithmetic operation in C code
-(i.e., not in an annotation), VeriFast checks that the result
-of the operation fits within the bounds of the result type,
-unless arithmetic overflow checking has been turned off in the
-\textbf{Verify} menu. As a result, VeriFast rejects the above
-program. It also rejects the following program:
-\begin{lstlisting}
-int int_add(int x, int y)
-    //@ requires true;
-    //@ ensures result == x + y;
-{
-    return x + y;
-}
-\end{lstlisting}
-Let's try to fix this function so that it works correctly on a
-32-bit machine. Here's a first attempt:
-\begin{lstlisting}
-int int_add(int x, int y)
-    //@ requires true;
-    //@ ensures result == x + y;
-{
-    if (0 <= x) {
-        if (INT_MAX - x < y) abort();
-    } else {
-        if (y < INT_MIN - x) abort();
-    }
-    return x + y;
-}
-\end{lstlisting}
-Even though this function works correctly on a 32-bit machine,
-VeriFast does not accept it. This is because VeriFast checks
-that the results of the arithmetic operations are within the
-bounds of the type, but it does not assume that the original
-values are within the bounds of the type. These assumptions are
-not generated automatically for verification performance
-reasons. In order to generate these assumptions, we must insert
-\lstinline!produce_limits! ghost commands into the code. The
-argument of a \lstinline!produce_limits! command must be the
-name of a C local variable (i.e., not a local variable declared
-in an annotation). The following program verifies.
-\begin{lstlisting}
-int int_add(int x, int y)
-    //@ requires true;
-    //@ ensures result == x + y;
-{
-    //@ produce_limits(x);
-    //@ produce_limits(y);
-    if (0 <= x) {
-        if (INT_MAX - x < y) abort();
-    } else {
-        if (y < INT_MIN - x) abort();
-    }
-    return x + y;
-}
-\end{lstlisting}
-
-Note: The above overflow-checked integer addition
-implementation is probably not the most optimal one in terms of
-performance. For example, the x86 instruction set includes the
-INTO (Interrupt on Overflow) instruction, which causes a
-software interrupt if the overflow flag is set. An
-implementation that uses this instruction is likely to perform
-much better.
-
 \section{Function Pointers}\label{section:function-pointers}
 
 Let's write a function that takes a stack and removes those elements that do not satisfy a given predicate:
@@ -1608,6 +1511,117 @@ predicate character(char *p; char v);
 \end{lstlisting}
 VeriFast does not yet support taking the address of a local
 variable.
+
+\section{Arithmetic Overflow}
+
+Consider the following program:
+\begin{lstlisting}
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    int x = 2000000000 + 2000000000;
+    assert(0 <= x);
+    return 0;
+}
+\end{lstlisting}
+The behavior of this program is not uniquely defined by the C
+language. Specifically, the \lstinline!int! type supports only
+a finite range of integers, and furthermore the C language does
+not specify the bounds of this range. The bounds are
+\emph{implementation-dependent}. The C language does specify
+that the least and greatest value of type \lstinline!int! are
+given by the macros \lstinline!INT_MIN! and
+\lstinline!INT_MAX!, respectively, and that \lstinline!INT_MIN!
+is not greater than -32767 and that \lstinline!INT_MAX! is not
+less than 32767. Furthermore, the C language does not specify
+what happens if an arithmetic operation on type \lstinline!int!
+yields a value that is not within the limits of type
+\lstinline!int!.
+
+VeriFast does not attempt to be sound with respect to arbitrary
+C implementations (or even with respect to arbitrary
+standard-compliant ones). Specifically, it assumes that
+\lstinline!INT_MIN! equals $-2^{31}$ and \lstinline!INT_MAX!
+equals $2^{31}-1$.
+
+When symbolically evaluating an arithmetic operation in C code
+(i.e., not in an annotation), VeriFast checks that the result
+of the operation fits within the bounds of the result type,
+unless arithmetic overflow checking has been turned off in the
+\textbf{Verify} menu. As a result, VeriFast rejects the above
+program. It also rejects the following program:
+\begin{lstlisting}
+void int_add(int *x, int *y)
+    //@ requires integer(x, ?vx)   &*& integer(y, ?vy);
+    //@ ensures  integer(x, vx+vy) &*& integer(y,  vy);
+{
+    int x_deref = *x;
+    int y_deref = *y;
+    *x = x_deref + y_deref;
+}
+\end{lstlisting}
+Let's try to fix this function so that it works correctly on a
+32-bit machine. Here's a first attempt:
+\begin{lstlisting}
+#include "stdlib.h"
+void int_add(int *x_ptr, int *y_ptr)
+    //@ requires integer(x_ptr, ?x_value)        &*& integer(y_ptr, ?y_value);
+    //@ ensures  integer(x_ptr, x_value+y_value) &*& integer(y_ptr,  y_value);
+{
+    int x = *x_ptr;
+    int y = *y_ptr;
+    if (0 <= x) {
+        if (INT_MAX - x < y) abort();
+    } else {
+        if (y < INT_MIN - x) abort();
+    }
+    *x_ptr = x + y;
+}
+\end{lstlisting}
+Even though this function works correctly on a 32-bit machine,
+VeriFast does not accept it. This is because VeriFast checks
+that the results of the arithmetic operations are within the
+bounds of the type, but it does not assume that the original
+values are within the bounds of the type. These assumptions are
+not generated automatically for verification performance
+reasons. In order to generate these assumptions, we must insert
+\lstinline!produce_limits! ghost commands into the code. The
+argument of a \lstinline!produce_limits! command must be the
+name of a C local variable (i.e., not a local variable declared
+in an annotation). The following program verifies.
+\begin{lstlisting}
+#include "stdlib.h"
+void int_add(int *x_ptr, int *y_ptr)
+    //@ requires integer(x_ptr, ?x_value)        &*& integer(y_ptr, ?y_value);
+    //@ ensures  integer(x_ptr, x_value+y_value) &*& integer(y_ptr,  y_value);
+{
+    int x = *x_ptr;
+    int y = *y_ptr;
+    //@ produce_limits(x);
+    //@ produce_limits(y);
+    if (0 <= x) {
+        if (INT_MAX - x < y) abort();
+    } else {
+        if (y < INT_MIN - x) abort();
+    }
+    *x_ptr = x + y;
+}
+\end{lstlisting}
+
+Note: The above overflow-checked integer addition
+implementation is probably not the most optimal one in terms of
+performance. For example, the x86 instruction set includes the
+INTO (Interrupt on Overflow) instruction, which causes a
+software interrupt if the overflow flag is set. An
+implementation that uses this instruction is likely to perform
+much better.
+
+Note: in case an \lstinline!integer!, \lstinline!character! or
+\lstinline!pointer! chunk is on the heap, one can also use
+the lemmas \lstinline!integer_limits!, \lstinline!character_limits!
+and \lstinline!pointer_limits! respectively. The contracts
+of these lemmas can be read in the file \texttt{prelude.h}.
 
 \section{Predicate Families}\label{section:predicate-families}
 

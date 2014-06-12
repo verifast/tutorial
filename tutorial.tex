@@ -302,7 +302,13 @@ about the old value of the field when the function is
 called.\footnote{VeriFast also supports a more concise syntax
 for field chunks. For example,
 \lstinline!account_balance(myAccount, _)! can also be written as
-\lstinline!myAccount->balance |-> _!.}
+\lstinline!myAccount->balance |-> _!.
+In fact, the latter (field chunk-specific) syntax is generally recommended
+over the former (generic chunk) syntax because it causes
+VeriFast to take into account the field chunk-specific information that there is at most one
+chunk for a given field, and that the field's value is within the limits of
+its type. However, for didactical reasons, in this tutorial we initially use the generic
+chunk syntax so that the chunks written in the annotations and the heap chunks shown in the VeriFast IDE look the same.}
 
 VeriFast now highlights the brace that closes the body of the
 function. This means we successfully verified the field

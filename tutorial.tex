@@ -18,10 +18,10 @@
 
 \newtheorem{exercise}{Exercise}
 
-\title{The VeriFast Program Verifier: A Tutorial\\
----Under Construction---}
+\title{The VeriFast Program Verifier: A Tutorial}
 
-\author{Bart Jacobs \and Jan Smans \and Frank Piessens}
+\author{Bart Jacobs \and Jan Smans \and Frank Piessens\\
+{\small iMinds-DistriNet, Department of Computer Science, KU Leuven - University of Leuven, Belgium}}
 
 \begin{document}
 
@@ -35,7 +35,7 @@
 \section{Introduction}
 
 VeriFast is a program verification tool for verifying certain
-correctness properties of single-threaded and multithreaded C
+correctness properties of single-threaded and multithreaded C\footnote{VeriFast also supports Java. See \emph{VeriFast for Java: A Tutorial}.}
 programs. The tool reads a C program consisting of one or more
 .c source code files (plus any .h header files referenced from
 these .c files) and reports either ``0 errors found'' or
@@ -46,14 +46,15 @@ sometimes incorrectly report ``0 errors found''; see the
 ``Known unsoundnesses'' section in the Reference Manual. There
 may also be unknown unsoundnesses.} that the program
 \begin{itemize}
-\item does not perform illegal memory accesses, such as
-    reading or writing a struct instance field after the
-    struct instance has been freed, and
-\item does not include a certain type of concurrency errors
-    known as \emph{data races}, i.e. unsynchronized
-    conflicting accesses of the same field by multiple
-    threads. Accesses are considered conflicting if at
-    least one of them is a write access. And
+\item does not perform illegal memory accesses, such as reading or
+    writing a struct instance field after the struct instance has been
+    freed, or reading or writing beyond the end of an array (known as
+    a \emph{buffer overflow}, the most common cause of security
+    vulnerabilities in operating systems and internet services) and
+\item does not include a certain type of concurrency errors known as
+    \emph{data races}, i.e.~unsynchronized conflicting accesses of the
+    same field by multiple threads. Accesses are considered
+    conflicting if at least one of them is a write access. And
 \item complies with function preconditions and
     postconditions specified by the programmer in the form
     of special comments (known as \emph{annotations}) in
@@ -75,6 +76,24 @@ injuries. For such programs, formal verification approaches
 such as VeriFast may be the most effective way to achieve the
 desired level of reliability.
 
+To detect all errors, VeriFast performs \emph{modular symbolic execution}
+of the program. In particular, VeriFast symbolically executes the body of
+each function of the program, starting from the symbolic state described
+by the function's precondition, checking that \emph{permissions} are
+present in the symbolic state for each memory location accessed by a
+statement, updating the symbolic state to take into account each
+statement's effect, and checking, whenever the function returns, that the
+final symbolic state satisfies the function's postcondition. A symbolic
+state consists of a \emph{symbolic heap}, containing permissions (known as
+\emph{chunks}) for accessing certain memory locations, a \emph{symbolic
+store}, assigning a symbolic value to each local variable, and a
+\emph{path condition}, which is the set of \emph{assumptions} about the
+values of the \emph{symbols} used in the symbolic state on the current
+execution path. Symbolic execution always terminates, because thanks to
+the use of loop invariants each loop body needs to be symbolically
+executed only once, and symbolically executing a function call uses only
+its precondition and postcondition, not its body.
+
 We will now proceed to introduce the tool's features step by
 step. To try the examples and exercises in this tutorial
 yourself, please download the release from the VeriFast website
@@ -82,9 +101,9 @@ at
 \begin{center}
 \texttt{http://www.cs.kuleuven.be/\symbol{126}bartj/verifast/}
 \end{center}
-. You will find a command-line version of the tool
-(\texttt{verifast.exe}), and a version that presents a
-graphical user interface (\texttt{vfide.exe}).
+. You will find in the \texttt{bin} directory a command-line version of
+the tool (\texttt{verifast.exe}), and a version that presents a graphical
+user interface (\texttt{vfide.exe}).
 
 \section{Example: illegal\_access.c}
 
@@ -93,24 +112,26 @@ errors that are difficult to spot through testing or code
 review, we start by applying the tool to a very simple C
 program that contains a subtle error.
 
-Please start \texttt{vfide.exe} with the
-\texttt{illegal\_access.c} program that can be found on the
-VeriFast homepage. The program will be shown in the VeriFast
-IDE. To verify the program, choose the \textbf{Verify program}
-command in the \textbf{Verify} menu, press the \textbf{Play}
-toolbar button, or press F5. You will see something like
-Fig~\ref{figure:illegal-access1}.
+Please start \texttt{vfide.exe} with the \texttt{illegal\_access.c}
+program that can be downloaded from
+\begin{center}
+\texttt{http://www.cs.kuleuven.be/\symbol{126}bartj/verifast/illegal\_access.c}
+\end{center}
+. The program will be shown in the VeriFast IDE. To verify the program,
+choose the \textbf{Verify program} command in the \textbf{Verify} menu,
+press the \textbf{Play} toolbar button, or press F5. You will see
+something like Fig~\ref{figure:illegal-access1}.
 \begin{figure}
 \begin{center}
 \includegraphics[width=7cm]{illegal_access.png}
 \end{center}
 \caption{A screenshot of \texttt{illegal\_access.c} in the VeriFast IDE}\label{figure:illegal-access1}
 \end{figure}
-The program attempts to access a field of a struct instance
-allocated using $\mathit{malloc}$. However, if there is
-insufficient memory, $\mathit{malloc}$ returns zero and no
-memory is allocated. VeriFast detects the illegal memory access
-that happens in this case. Notice the following GUI elements:
+The program attempts to access the field \lstinline|balance| of the struct
+instance \lstinline|myAccount| allocated using $\mathit{malloc}$. However,
+if there is insufficient memory, $\mathit{malloc}$ returns zero and no
+memory is allocated. VeriFast detects the illegal memory access that
+happens in this case. Notice the following GUI elements:
 \begin{itemize}
 \item The erroneous program element is displayed in a red
     color with a double underline.
@@ -210,7 +231,7 @@ free the struct instance.
 If we ask VeriFast to verify this program, VeriFast reports the
 error $$\textsf{No matching heap chunks:
 malloc\_block\_account(myAccountLocal\_addr)}$$ at the
-$\mathit{free}$ statement. Indeed, this statement is incorrect,
+$\mathit{free}$ statement. Indeed, the call of $\mathit{free}$ is incorrect,
 since $\mathit{free}$ may only be applied to a struct instance
 allocated on the heap by $\mathsf{malloc}$, not to a struct
 instance allocated on the stack as a local variable.
@@ -419,7 +440,7 @@ Now factor out the creation and the disposal of the
 $\mathsf{account}$ struct instance into separate functions as
 well. The creation function should initialize the balance to
 zero. Note: if you need to mention multiple heap chunks in an
-assertion, separate them using the \emph{separate conjunction}
+assertion, separate them using the \emph{separating conjunction}
 \lstinline!&*&! (ampersand-star-ampersand). Also, you can refer
 to a function's return value in its postcondition by the name
 \lstinline!result!.

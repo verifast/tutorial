@@ -6,6 +6,7 @@
 \usepackage[T1]{fontenc}
 \usepackage{ae,aecompl}
 \usepackage[scaled]{luximono}
+\usepackage{array}
 
 \addtolength{\hoffset}{-2cm}
 \addtolength{\textwidth}{4cm}
@@ -21,7 +22,7 @@
 \title{The VeriFast Program Verifier: A Tutorial}
 
 \author{Bart Jacobs \and Jan Smans \and Frank Piessens\\
-{\small iMinds-DistriNet, Department of Computer Science, KU Leuven - University of Leuven, Belgium}}
+{\small imec-DistriNet, Department of Computer Science, KU Leuven - University of Leuven, Belgium}}
 
 \begin{document}
 
@@ -42,8 +43,7 @@ these .c files) and reports either ``0 errors found'' or
 indicates the location of a potential error. If the tool
 reports ``0 errors found'', this means\footnote{There are a few
 known reasons (known as \emph{unsoundnesses}) why the tool may
-sometimes incorrectly report ``0 errors found''; see the
-``Known unsoundnesses'' section in the Reference Manual. There
+sometimes incorrectly report ``0 errors found''; see \textsf{soundness.md} at \textsf{https://github.com/verifast/verifast}. There
 may also be unknown unsoundnesses.} that the program
 \begin{itemize}
 \item does not perform illegal memory accesses, such as reading or
@@ -92,7 +92,7 @@ values of the \emph{symbols} used in the symbolic state on the current
 execution path. Symbolic execution always terminates, because thanks to
 the use of loop invariants each loop body needs to be symbolically
 executed only once, and symbolically executing a function call uses only
-its precondition and postcondition, not its body.
+the function's precondition and postcondition, not its body.
 
 We will now proceed to introduce the tool's features step by
 step. To try the examples and exercises in this tutorial
@@ -128,8 +128,8 @@ something like Fig~\ref{figure:illegal-access1}.
 \caption{A screenshot of \texttt{illegal\_access.c} in the VeriFast IDE}\label{figure:illegal-access1}
 \end{figure}
 The program attempts to access the field \lstinline|balance| of the struct
-instance \lstinline|myAccount| allocated using $\mathit{malloc}$. However,
-if there is insufficient memory, $\mathit{malloc}$ returns zero and no
+instance \lstinline|myAccount| allocated using \lstinline|malloc|. However,
+if there is insufficient memory, \lstinline|malloc| returns zero and no
 memory is allocated. VeriFast detects the illegal memory access that
 happens in this case. Notice the following GUI elements:
 \begin{itemize}
@@ -142,7 +142,7 @@ happens in this case. Notice the following GUI elements:
     is not accessible to the program.
     $\mathsf{account\_balance}$ is the type of heap chunk
     that represents the $\mathsf{balance}$ field of an
-    $\mathsf{account}$ struct instance.
+    instance of struct $\mathsf{account}$.
 \item The assignment statement is shown on a yellow
     background. This is because the assignment statement is
     the \emph{current step}. VeriFast verifies each
@@ -160,46 +160,181 @@ happens in this case. Notice the following GUI elements:
 \end{itemize}
 
 To correct the error, uncomment the commented statement. Now
-press F5 again. The program now verifies and no symbolic
-execution path is shown in the Steps pane.
+press F5 again. We get a green bar: the program now verifies. This means VeriFast has symbolically executed all possible paths of execution through function \lstinline|main|, and found no errors.
 
-To inspect the symbolic execution of the $\mathsf{main}$
-function anyway, place the cursor on the last line (i.e., on
-the brace that closes the function body) and choose the
-\textbf{Run to cursor} command from the \textbf{Verify} menu,
-press the \textbf{Run to cursor} toolbar button, or press
-Ctrl+F5. (See Fig.~\ref{figure:illegal-access2}.)
+Let's take a closer look at how VeriFast symbolically executed this function. After VeriFast has symbolically executed a program, you can view the \emph{symbolic execution tree} for each function in the Trees pane. The Trees pane is hidden by default, but you can reveal it by dragging the right-hand border of the VeriFast window to the left. At the top of the Trees pane is a drop-down list of all functions that have been symbolically executed. Select the \textsf{Verifying function \lstinline|main|} item to view the symbolic execution tree for function \lstinline|main|.
+
+A symbolic execution tree has three kinds of nodes:
+\begin{itemize}
+\item The \emph{top node} represents the start of the symbolic execution. Click the top node: in the initial symbolic execution state, there are no heap chunks (the Heap chunks pane is empty), there are no local variables (the Locals pane is empty), and there are no assumptions (the Assumptions pane is empty).
+\item There is one \emph{branch node} at each point where a symbolic execution path forks into two paths. This happens when multiple cases need to be considered in the symbolic execution; it is therefore also called a \emph{case split}. The symbolic execution of function \lstinline|main| involves one case split: symbolic execution of a \lstinline|malloc| call forks into one branch where no memory is available and therefore \lstinline|malloc| returns a null pointer, and another branch where memory is available and therefore \lstinline|malloc| allocates the requested amount of memory and returns a pointer to it. (A case split also happens when symbolically executing the \lstinline|if| statement, but since the two cases of the \lstinline|if| statement coincide with the two cases of the \lstinline|malloc| statement, no separate branch node is shown.)
+\item There is one \emph{leaf node} at the end of each complete symbolic execution path through the function. Click any leaf node to see the full corresponding symbolic execution path in the Steps pane.
+Function \lstinline|main| has two symbolic execution paths: the path where no memory is available ends when the program ends due to the call of \lstinline|abort|; the path where memory is available ends when the function returns.
+\end{itemize}
+
+Click the rightmost leaf node to view the execution path where \lstinline|malloc| successfully allocates memory. Notice that VeriFast shows arrows in the left margin next to the code of function \lstinline|main| to indicate that this path executes the second case of the \lstinline|malloc| statement and the second case of the \lstinline|if| statement.
+
+To better understand the details of VeriFast's symbolic execution, we will step through this path from the top. Select the first step in the Steps pane. Then, press the Down arrow key. The \textsf{Verifying function \lstinline|main|} step does not affect the symbolic state. The \textsf{Producing assertion} step adds the assumption \textsf{true} to the Assumptions. We will consider production and consumption of assertions in detail later in this tutorial. We now arrive at the \textsf{Executing statement} step for the \lstinline|malloc| statement. This statement affects the symbolic state in three ways:
+\begin{itemize}
+\item It adds the heap chunks $\mathsf{account\_balance}(\mathsf{myAccount}, \mathsf{value})$ and $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$ to the symbolic heap (as shown in the Heap chunks pane). Here, $\mathsf{myAccount}$ and $\mathsf{value}$ are \emph{symbols} that represent unknown values. Specifically, $\mathsf{myAccount}$ represents the memory address of the newly allocated struct instance, and $\mathsf{value}$ represents the initial value of the \lstinline|balance| field of the struct instance. (In C, the initial values of the fields of a newly allocated struct instance are unspecified, unlike in Java where the fields of a new object are initialized to the default value of their type.)
+
+VeriFast \emph{freshly picks} these symbols during this symbolic execution step. That is, to represent the address of the new struct instance and the initial value of the \lstinline|balance| field, VeriFast uses symbols that are not yet being used on this symbolic execution path. To see this, try verifying the function \lstinline|test| shown below:
+\begin{lstlisting}
+void test()
+    //@ requires true;
+    //@ ensures true;
+{
+    {
+        struct account *myAccount = malloc(sizeof(struct account));
+        if (myAccount == 0) { abort(); }
+    }
+    {
+        struct account *myAccount = malloc(sizeof(struct account));
+        if (myAccount == 0) { abort(); }
+    }
+}
+\end{lstlisting}
+Notice that to symbolically execute the first \lstinline|malloc| statement, VeriFast picked symbols $\mathsf{myAccount}$ and $\mathsf{value}$, and to symbolically execute the second \lstinline|malloc| statement, VeriFast picked symbols $\mathsf{myAccount0}$ and $\mathsf{value0}$.
+
+\item It adds the assumption $\mathsf{myAccount} \neq 0$ (perhaps written differently) to the path condition (as shown in the Assumptions pane). Indeed, if \lstinline|malloc| succeeds, the returned pointer is not a null pointer.
+\item It adds a binding to the symbolic store (shown in the Locals pane) that binds local variable \lstinline|myAccount| to symbolic value $\mathsf{myAccount}$. Indeed, the program assigns the result of the \lstinline|malloc| call (represented by the symbol $\mathsf{myAccount}$) to the local variable \lstinline|myAccount|. Note that the fact that in this case the local variable and the symbol have the same name is incidental and has no special significance.
+\end{itemize}
+
 \begin{figure}
 \begin{center}
-\includegraphics[width=7cm]{illegal_access2.png}
+\begin{tabular}{c @{} l}
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:}\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:}
+\end{tabular}}}\\
+\rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\includegraphics[width=1em]{branch-left.pdf}}}\quad\quad$ & \lstinline|struct account *myAccount = malloc(sizeof(struct account));|\\[2ex]
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:} & $\mathsf{myAccount} = 0$\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}
+\end{tabular}
 \end{center}
-\caption{The VeriFast IDE shows a symbolic execution path of function $\mathsf{main}$}\label{figure:illegal-access2}
+\caption{Symbolic execution of a \lstinline|malloc| statement (first case)}\label{fig:symexec-malloc-case1}
 \end{figure}
 
-Running to the cursor means showing an execution path that
-reaches the cursor. In general, there may be multiple such
-paths; in that case, the first such path is chosen (in the
-order on paths induced by the order on branches induced by the
-program text). In the example, there is only one path.
+\begin{figure}
+\begin{center}
+\begin{tabular}{c @{} l}
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:}\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:}
+\end{tabular}}}\\
+\rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\reflectbox{\includegraphics[width=1em]{branch-left.pdf}}}}\quad\quad$ & \lstinline|struct account *myAccount = malloc(sizeof(struct account));|\\[2ex]
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{value}$\\
+\textbf{Assumptions:} & $\mathsf{myAccount} \neq 0$\\
+\textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, \mathsf{value})$, $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}
+\end{tabular}
+\end{center}
+\caption{Symbolic execution of a \lstinline|malloc| statement (second case)}\label{fig:symexec-malloc-case2}
+\end{figure}
 
-To understand how VeriFast tracks the state of memory, select
-the fifth step in the Steps pane, as in the figure. The
-$\mathit{free}$ statement is the next statement to be executed.
-In this step, the symbolic heap contains two heap chunks:
-$\mathsf{account\_balance}(\mathsf{myAccount}, 5)$ and
-$\mathsf{malloc\_block\_account}(\mathsf{myAccount})$. The
-first heap chunk denotes the fact that the $\mathsf{balance}$
-field of the $\mathsf{account}$ struct instance at address
-$\mathsf{myAccount}$ is accessible to the program, and has
-value 5. The second heap chunk denotes the fact that the
-program has permission to de-allocate the memory block at
-address $\mathsf{myAccount}$. If you select the next step, you
-notice that the $\mathit{free}$ statement removes both heap
-chunks from the symbolic heap. Indeed, de-allocating the struct
-instance removes both the permission to access the struct
-instance's field, and the permission to free the struct
-instance. This prevents illegal memory accesses and double free
-errors.
+Figure~\ref{fig:symexec-malloc-case2} summarizes the symbolic execution of \lstinline|malloc| statements, in the successful case. Figure~\ref{fig:symexec-malloc-case1} summarizes the unsuccessful case.
+
+The next step in the symbolic execution trace is the symbolic execution of the \lstinline|if| statement. An \lstinline|if| statement is like a \lstinline|malloc| statement in the sense that there are two cases to consider; therefore, for \lstinline|if| statements, too, VeriFast performs a case split and forks the symbolic execution path into two branches. On the first branch, VeriFast considers the case where the condition of the \lstinline|if| statement is true. It adds the assumption that this is the case to the path condition and symbolically executes the \emph{then} block of the \lstinline|if| statement. On the second branch, VeriFast considers the case where the condition of the \lstinline|if| statement is false. It adds the corresponding assumption to the path condition and symbolically executes the \emph{else} block, if any. Note that after adding an assumption to the path condition, VeriFast always checks if it can detect an inconsistency in the resulting path condition; if so, the current symbolic execution path does not correspond to any real execution path, so there is no point in continuing the symbolic execution of this path and VeriFast abandons it. This is what happens with the first branch of the \lstinline|if| statement after a successful \lstinline|malloc|; it is also what happens with the second branch of the \lstinline|if| statement after an unsuccessful \lstinline|malloc|.
+
+\begin{figure}
+\begin{center}
+\begin{tabular}{c @{} l}
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}\\
+\rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\includegraphics[width=1em]{branch-left.pdf}}}\quad\quad$ & \lstinline|if (myAccount == 0)|\\[2ex]
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:} & $\mathsf{myAccount} = 0$\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}
+\end{tabular}
+\end{center}
+\caption{Symbolic execution of an \lstinline|if| statement (first case). Symbolic execution continues with the \emph{then} block of the \lstinline|if| statement.}\label{fig:symexec-if-case1}
+\end{figure}
+
+\begin{figure}
+\begin{center}
+\begin{tabular}{c @{} l}
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}\\
+\rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\reflectbox{\includegraphics[width=1em]{branch-left.pdf}}}}\quad\quad$ & \lstinline|if (myAccount == 0)|\\[2ex]
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:} & $\mathsf{myAccount} \neq 0$\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}
+\end{tabular}
+\end{center}
+\caption{Symbolic execution of an \lstinline|if| statement (second case). Symbolic execution continues with the \emph{else} block of the \lstinline|if| statement, if any.}\label{fig:symexec-if-case2}
+\end{figure}
+
+Figures~\ref{fig:symexec-if-case1} and \ref{fig:symexec-if-case2} summarize the two cases of the symbolic execution of an \lstinline|if| statement.
+
+The next step of the symbolic execution path symbolically executes the statement that assigns value 5 to the \lstinline|balance| field of the newly allocated struct instance. When symbolically executing an assignment to a field of a struct instance, VeriFast first checks that a heap chunk for that field of that struct instance is present in the symbolic heap. If not, it reports a ``No such heap chunk'' verification failure. It might mean that the program is trying to access unallocated memory. If the chunk is present, VeriFast replaces the second argument of the chunk with the value of the right-hand side of the assignment. This is shown in Figure~\ref{fig:symexec-field-update}.
+
+\begin{figure}
+\begin{center}
+\begin{tabular}{c @{} l}
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{value}$\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, \mathsf{value})$\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}\\
+\rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\includegraphics[width=.5em]{step.pdf}}}\quad\quad$ & \lstinline|myAccount->balance = 5;|\\[2ex]
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{value}$\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, 5)$\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}
+\end{tabular}
+\end{center}
+\caption{Symbolic execution of a struct field assignment statement}\label{fig:symexec-field-update}
+\end{figure}
+
+Finally, symbolic execution of the \lstinline|free| statement checks that the two heap chunks that were added by the \lstinline|malloc| statement (the chunk for the \lstinline|balance| field and the malloc block chunk) are still present in the symbolic heap. If not, VeriFast reports a verification failure; the program might be trying to free a struct instance that has already been freed. Otherwise, it removes the chunks, as shown in Figure~\ref{fig:symexec-free}. This ensures that if a program frees a struct instance and then attempts to access that struct instance's fields, symbolic execution of the statements accessing the fields will fail (because the heap chunks for the fields will be missing).
+
+\begin{figure}
+\begin{center}
+\begin{tabular}{c @{} l}
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, 5)$, $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}\\
+\rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\includegraphics[width=.5em]{step.pdf}}}\quad\quad$ & \lstinline|free(myAccount);|\\[2ex]
+\multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
+\textbf{Symbols:} & $\mathsf{myAccount}$\\
+\textbf{Assumptions:}\\
+\textbf{Heap chunks:}\\
+\textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
+\end{tabular}}}
+\end{tabular}
+\end{center}
+\caption{Symbolic execution of a \lstinline|free| statement}\label{fig:symexec-free}
+\end{figure}
 
 \section{malloc\_block Chunks}\label{section:malloc_block}
 

@@ -7,6 +7,26 @@
 \usepackage{ae,aecompl}
 \usepackage[scaled]{luximono}
 \usepackage{array}
+\usepackage{tikz}
+
+\DeclareMathAlphabet{\mathsfsl}{OT1}{cmss}{m}{sl}
+
+\usetikzlibrary{arrows,shapes,snakes,automata,backgrounds,petri,positioning}
+
+\tikzstyle{place}=[circle,draw,minimum size=5mm]
+% -> Uses trick from http://tex.stackexchange.com/a/170207
+\tikzstyle{transitionV}=[rectangle,thick,fill=black,minimum width=5mm,
+    inner ysep=1pt]
+\tikzstyle{transitionH}=[rectangle,thick,fill=black,minimum height=5mm,
+    inner xsep=1pt]
+\tikzstyle{every picture}+=[node distance=0.75cm,>=stealth',auto]
+
+\tikzset{
+    state/.style={
+           rectangle,
+           draw=black
+           },
+}
 
 \addtolength{\hoffset}{-2cm}
 \addtolength{\textwidth}{4cm}
@@ -167,7 +187,7 @@ Let's take a closer look at how VeriFast symbolically executed this function. Af
 A symbolic execution tree has three kinds of nodes:
 \begin{itemize}
 \item The \emph{top node} represents the start of the symbolic execution. Click the top node: in the initial symbolic execution state, there are no heap chunks (the Heap chunks pane is empty), there are no local variables (the Locals pane is empty), and there are no assumptions (the Assumptions pane is empty).
-\item There is one \emph{branch node} at each point where a symbolic execution path forks into two paths. This happens when multiple cases need to be considered in the symbolic execution; it is therefore also called a \emph{case split}. The symbolic execution of function \lstinline|main| involves one case split: symbolic execution of a \lstinline|malloc| call forks into one branch where no memory is available and therefore \lstinline|malloc| returns a null pointer, and another branch where memory is available and therefore \lstinline|malloc| allocates the requested amount of memory and returns a pointer to it. (A case split also happens when symbolically executing the \lstinline|if| statement, but since the two cases of the \lstinline|if| statement coincide with the two cases of the \lstinline|malloc| statement, no separate branch node is shown.)
+\item There is one \emph{fork node} at each point where a symbolic execution path forks into two paths. This happens when multiple cases need to be considered in the symbolic execution; it is therefore also called a \emph{case split}. The symbolic execution of function \lstinline|main| involves one case split: symbolic execution of a \lstinline|malloc| call forks into one branch where no memory is available and therefore \lstinline|malloc| returns a null pointer, and another branch where memory is available and therefore \lstinline|malloc| allocates the requested amount of memory and returns a pointer to it. (A case split also happens when symbolically executing the \lstinline|if| statement, but since the two cases of the \lstinline|if| statement coincide with the two cases of the \lstinline|malloc| statement, no separate fork node is shown.)
 \item There is one \emph{leaf node} at the end of each complete symbolic execution path through the function. Click any leaf node to see the full corresponding symbolic execution path in the Steps pane.
 Function \lstinline|main| has two symbolic execution paths: the path where no memory is available ends when the program ends due to the call of \lstinline|abort|; the path where memory is available ends when the function returns.
 \end{itemize}
@@ -335,6 +355,113 @@ Finally, symbolic execution of the \lstinline|free| statement checks that the tw
 \end{center}
 \caption{Symbolic execution of a \lstinline|free| statement}\label{fig:symexec-free}
 \end{figure}
+
+A program's \emph{symbolic execution forest} (consisting of one symbolic execution tree for each of the program's functions) constitutes a finite description of the program's (usually infinite-depth and infinite-width) \emph{concrete execution tree}, consisting of the program's \emph{concrete execution paths}.
+
+\begin{figure}
+\begin{center}
+\begin{tikzpicture}
+\node [state] (s1) {\begin{tabular}{l l}
+\textbf{Chunks:}\\
+\textbf{Locals:}\\
+\end{tabular}};
+\node [transitionV] (t1) [below=of s1, label=right:\parbox{10cm}{\lstinline|struct acc *a = malloc(sizeof(struct acc));|}] {}
+  edge [pre] (s1);
+
+\node [state] (s22) [below=of t1] {\begin{tabular}{l @{\ } l}
+\textbf{C:} & $\mathsf{acc\_bal}(1, 33)$, $\mathsf{mb\_acc}(1)$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\end{tabular}}
+  edge [pre] (t1);
+\node [state] (s23) [right=of s22] {\begin{tabular}{l @{\ } l}
+\textbf{C:} & $\mathsf{acc\_bal}(2, 77)$, $\mathsf{mb\_acc}(2)$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\end{tabular}}
+  edge [pre] (t1);
+\node (s24) [right=of s23] {$\cdots$};
+
+\node [state] (s21) [left=of s22] {\begin{tabular}{l @{\ } l}
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t1);
+\node [transitionV] (t21) [below=of s21, label=right:\parbox{5cm}{\lstinline|if (a == 0)|}] {}
+  edge [pre] (s21);
+\node [state] (s31) [below=of t21] {\begin{tabular}{l @{\ } l}
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t21);
+\node [transitionV] (t31) [below=of s31, label=right:\parbox{5cm}{\lstinline|abort();|}] {}
+  edge [pre] (s31);
+
+\node [transitionV] (t22) [below=of s22, label=right:\parbox{5cm}{\lstinline|if (a == 0) \{ ... \}|}] {}
+  edge [pre] (s22);
+\node [state] (s32) [below=of t22] {\begin{tabular}{l @{\ } l}
+\textbf{C:} & $\mathsf{acc\_bal}(1, 33)$, $\mathsf{mb\_acc}(1)$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\end{tabular}}
+  edge [pre] (t22);
+\node [transitionV] (t32) [below=of s32, label=right:\parbox{5cm}{\lstinline|a->bal = 5;|}] {}
+  edge [pre] (s32);
+\node [state] (s42) [below=of t32] {\begin{tabular}{l @{\ } l}
+\textbf{C:} & $\mathsf{acc\_bal}(1, 5)$, $\mathsf{mb\_acc}(1)$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\end{tabular}}
+  edge [pre] (t32);
+\node [transitionV] (t42) [below=of s42, label=right:\parbox{5cm}{\lstinline|free(a);|}] {}
+  edge [pre] (s42);
+\node [state] (s52) [below=of t42] {\begin{tabular}{l @{\ } l}
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\end{tabular}}
+  edge [pre] (t42);
+\node [transitionV] (t52) [below=of s52, label=right:\parbox{5cm}{\lstinline|return 0;|}] {}
+  edge [pre] (s52);
+\node [state] (s62) [below=of t52] {\begin{tabular}{l @{\ } l}
+\textbf{C:}\\
+\textbf{L:} & \lstinline|result| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t52);
+
+\node [transitionV] (t23) [below=of s23, label=right:\parbox{5cm}{\lstinline|if (a == 0) \{ ... \}|}] {}
+  edge [pre] (s23);
+\node [state] (s33) [below=of t23] {\begin{tabular}{l @{\ } l}
+\textbf{C:} & $\mathsf{acc\_bal}(2, 77)$, $\mathsf{mb\_acc}(2)$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\end{tabular}}
+  edge [pre] (t23);
+\node [transitionV] (t33) [below=of s33, label=right:\parbox{5cm}{\lstinline|a->bal = 5;|}] {}
+  edge [pre] (s33);
+\node [state] (s43) [below=of t33] {\begin{tabular}{l @{\ } l}
+\textbf{C:} & $\mathsf{acc\_bal}(2, 5)$, $\mathsf{mb\_acc}(2)$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\end{tabular}}
+  edge [pre] (t33);
+\node [transitionV] (t43) [below=of s43, label=right:\parbox{5cm}{\lstinline|free(a);|}] {}
+  edge [pre] (s43);
+\node [state] (s53) [below=of t43] {\begin{tabular}{l @{\ } l}
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\end{tabular}}
+  edge [pre] (t43);
+\node [transitionV] (t53) [below=of s53, label=right:\parbox{5cm}{\lstinline|return 0;|}] {}
+  edge [pre] (s53);
+\node [state] (s63) [below=of t53] {\begin{tabular}{l @{\ } l}
+\textbf{C:}\\
+\textbf{L:} & \lstinline|result| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t53);
+\end{tikzpicture}
+\end{center}
+\caption{Concrete execution tree of the program of Figure~\ref{figure:illegal-access1} (after uncommenting the \lstinline|if| statement). We abbreviate \textbf{Chunks} as \textbf{C}, \textbf{Locals} as \textbf{L}, \lstinline|account| as \lstinline|acc|, \lstinline|balance| as \lstinline|bal|, \lstinline|myAccount| as \lstinline|a|, and $\mathsf{malloc\_block}$ as $\mathsf{mb}$. Note that the tree is not shown fully: the \lstinline|malloc| node has one child node for each combination $(\ell, v)$ of an address $\ell$ for the new account and an initial value $v$ of its \lstinline|balance| field.}\label{fig:concrete-execution-tree}
+\end{figure}
+
+The concrete execution tree of the corrected version of the program of Figure~\ref{figure:illegal-access1} is shown in Figure~\ref{fig:concrete-execution-tree}. Notice that it is in fact (practically) infinite-width. For this example program, the concrete execution tree is not infinite-depth, because the program has no loops or recursion. If the program had a loop with an unbounded number of iterations, the tree would have been infinite-depth as well.
+
+\begin{exercise}\label{exercise:symex-tree}
+Draw the symbolic execution tree of the \lstinline|main| function of the corrected version of the program of Figure~\ref{figure:illegal-access1}. A symbolic execution tree differs from a concrete execution tree in that each state includes a set of used \emph{symbols} and a set of \emph{assumptions} about these symbols, and in that the heap chunks and the local variable bindings are expressed using these symbols. Furthermore, by using these symbols, a single path in a symbolic execution tree can be used to describe infinitely many corresponding paths in the corresponding concrete execution tree.
+\end{exercise}
 
 \section{malloc\_block Chunks}\label{section:malloc_block}
 
@@ -4397,6 +4524,91 @@ directory \lstinline!tutorial! of the VeriFast distribution).
 \end{exercise}
 
 \section{Solutions to Exercises}
+
+\subsection{Exercise \ref{exercise:symex-tree}}
+
+See Figure~\ref{fig:symex-tree}. Note: there are many alternative ways to express this symbolic execution tree that are equivalent. In particular, replacing a symbolic state by an equivalent one yields an equivalent symbolic execution tree. Two symbolic states are equivalent if they denote the same set of concrete states. For example, if there is only one value $v$ for some symbol $\varsigma$ that satisfies the assumptions, then replacing any occurrence of $\varsigma$ by $v$ yields an equivalent symbolic state. For another example, if a symbol is not mentioned by the assumptions, the heap chunks or the local variable bindings, then removing it from the set of used symbols yields an equivalent symbolic state.
+
+\begin{figure}
+\begin{center}
+\begin{tikzpicture}
+\node [state] (s1) {\begin{tabular}{l l}
+\textbf{Symbols:}\\
+\textbf{Assumptions:}\\
+\textbf{Chunks:}\\
+\textbf{Locals:}\\
+\end{tabular}};
+\node [transitionV] (t1) [below=of s1, label=right:\parbox{10cm}{\lstinline|struct acc *a = malloc(sizeof(struct acc));|}] {}
+  edge [pre] (s1);
+
+\node [state] (s22) [below right=of t1] {\begin{tabular}{l @{\ } l}
+\textbf{S:} & $\mathsfsl{a}, \mathsfsl{v}$\\
+\textbf{A:} & $\mathsfsl{a} \neq 0$\\
+\textbf{C:} & $\mathsf{acc\_bal}(\mathsfsl{a}, \mathsfsl{v})$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $\mathsfsl{a}$
+\end{tabular}}
+  edge [pre] (t1);
+
+\node [state] (s21) [left=of s22] {\begin{tabular}{l @{\ } l}
+\textbf{S:}\\
+\textbf{A:}\\
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t1);
+\node [transitionV] (t21) [below=of s21, label=right:\parbox{5cm}{\lstinline|if (a == 0)|}] {}
+  edge [pre] (s21);
+\node [state] (s31) [below=of t21] {\begin{tabular}{l @{\ } l}
+\textbf{S:}\\
+\textbf{A:}\\
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t21);
+\node [transitionV] (t31) [below=of s31, label=right:\parbox{5cm}{\lstinline|abort();|}] {}
+  edge [pre] (s31);
+
+\node [transitionV] (t22) [below=of s22, label=right:\parbox{5cm}{\lstinline|if (a == 0) \{ ... \}|}] {}
+  edge [pre] (s22);
+\node [state] (s32) [below=of t22] {\begin{tabular}{l @{\ } l}
+\textbf{S:} & $\mathsfsl{a}, \mathsfsl{v}$\\
+\textbf{A:} & $\mathsfsl{a} \neq 0$\\
+\textbf{C:} & $\mathsf{acc\_bal}(\mathsfsl{a}, \mathsfsl{v})$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $\mathsfsl{a}$
+\end{tabular}}
+  edge [pre] (t22);
+\node [transitionV] (t32) [below=of s32, label=right:\parbox{5cm}{\lstinline|a->bal = 5;|}] {}
+  edge [pre] (s32);
+\node [state] (s42) [below=of t32] {\begin{tabular}{l @{\ } l}
+\textbf{S:} & $\mathsfsl{a}$\\
+\textbf{A:} & $\mathsfsl{a} \neq 0$\\
+\textbf{C:} & $\mathsf{acc\_bal}(\mathsfsl{a}, 5)$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $\mathsfsl{a}$
+\end{tabular}}
+  edge [pre] (t32);
+\node [transitionV] (t42) [below=of s42, label=right:\parbox{5cm}{\lstinline|free(a);|}] {}
+  edge [pre] (s42);
+\node [state] (s52) [below=of t42] {\begin{tabular}{l @{\ } l}
+\textbf{S:} & $\mathsfsl{a}$\\
+\textbf{A:} & $\mathsfsl{a} \neq 0$\\
+\textbf{C:}\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $\mathsfsl{a}$
+\end{tabular}}
+  edge [pre] (t42);
+\node [transitionV] (t52) [below=of s52, label=right:\parbox{5cm}{\lstinline|return 0;|}] {}
+  edge [pre] (s52);
+\node [state] (s62) [below=of t52] {\begin{tabular}{l @{\ } l}
+\textbf{S:}\\
+\textbf{A:}\\
+\textbf{C:}\\
+\textbf{L:} & \lstinline|result| $\mapsto$ 0
+\end{tabular}}
+  edge [pre] (t52);
+
+\end{tikzpicture}
+\end{center}
+\caption{Symbolic execution tree of the program of Figure~\ref{figure:illegal-access1} (after uncommenting the \lstinline|if| statement). We abbreviate \textbf{Chunks} as \textbf{C}, \textbf{Locals} as \textbf{L}, \lstinline|account| as \lstinline|acc|, \lstinline|balance| as \lstinline|bal|, \lstinline|myAccount| as \lstinline|a|, and $\mathsf{malloc\_block}$ as $\mathsf{mb}$. Note that the tree is shown fully: the \lstinline|malloc| node has only two child nodes: the second child node summarizes (practically) infinitely many corresponding child nodes from the concrete execution tree. We print symbols in slanted font ($\mathsfsl{a}$) to avoid confusion with similarly named local variables (\lstinline|a|).}\label{fig:symex-tree}
+\end{figure}
 
 \subsection{Exercise \ref{exercise:account}: account.c}
 

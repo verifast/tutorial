@@ -2478,7 +2478,7 @@ Verify the program.
 \section{Multithreading}\label{section:multithreading}
 
 Consider the following program that walks a binary tree of
-integers, computes the faculty of the value of each node, sums
+integers, computes the factorial of the value of each node, sums
 up the results, and prints the sum to the console.
 \begin{lstlisting}
 int rand();
@@ -2632,11 +2632,11 @@ int main()
 }
 \end{lstlisting}
 The main program creates a tree of depth 22. It then starts two
-threads. The first thread computes the sum of the faculties of
+threads. The first thread computes the sum of the factorials of
 the values of the left subtree, and the second thread computes
-the sum of the faculties of the values of the right subtree.
+the sum of the factorials of the values of the right subtree.
 The main thread then waits for both threads to finish, and
-finally sums up the results of both threads with the faculty of
+finally sums up the results of both threads with the factorial of
 the root node's value. On the author's machine, this program
 takes only 7 seconds; a twofold speedup!
 
@@ -2704,11 +2704,11 @@ simply leak chunks that you no longer need.
 
 Suppose, now, that we want to adapt the program of the previous
 section as follows: instead of computing just the sum of the
-faculties, we want to compute both the sum of the faculties and
-the product of the faculties. Since our machine has two cores,
+factorials, we want to compute both the sum of the factorials and
+the product of the factorials. Since our machine has two cores,
 we want to have two threads: one that computes the sum of the
-faculties of the values of the nodes of the tree, and one that
-computes the product of the faculties of the values of the
+factorials of the values of the nodes of the tree, and one that
+computes the product of the factorials of the values of the
 nodes of the tree.
 
 To achieve this, first we generalize our

@@ -8,6 +8,9 @@
 \usepackage[scaled]{luximono}
 \usepackage{array}
 \usepackage{tikz}
+\usepackage{marvosym}
+
+\newcommand{\poison}{\textrm{\Biohazard}}
 
 \DeclareMathAlphabet{\mathsfsl}{OT1}{cmss}{m}{sl}
 
@@ -42,7 +45,7 @@
 \title{The VeriFast Program Verifier: A Tutorial}
 
 \author{Bart Jacobs \and Jan Smans \and Frank Piessens\\
-{\small imec-DistriNet, Department of Computer Science, KU Leuven - University of Leuven, Belgium}}
+{\small KU Leuven, Department of Computer Science, DistriNet Research Group}}
 
 \begin{document}
 
@@ -119,11 +122,13 @@ step. To try the examples and exercises in this tutorial
 yourself, please download the release from the VeriFast website
 at
 \begin{center}
-\texttt{http://www.cs.kuleuven.be/\symbol{126}bartj/verifast/}
+\texttt{https://github.com/verifast/verifast}
 \end{center}
 . You will find in the \texttt{bin} directory a command-line version of
 the tool (\texttt{verifast.exe}), and a version that presents a graphical
 user interface (\texttt{vfide.exe}).
+
+Throughout this tutorial, you will find exercises that ask you to annotate a small C program so that it is accepted by VeriFast. You can find solutions to all exercises at the end of this tutorial. Furthermore, un-annotated and annotated versions of each solution are included in the VeriFast distribution in directories \verb|tutorial| and \verb|tutorial_solutions|, respectively.
 
 \section{Example: illegal\_access.c}
 
@@ -135,7 +140,7 @@ program that contains a subtle error.
 Please start \texttt{vfide.exe} with the \texttt{illegal\_access.c}
 program that can be downloaded from
 \begin{center}
-\texttt{http://www.cs.kuleuven.be/\symbol{126}bartj/verifast/illegal\_access.c}
+\texttt{https://www.cs.kuleuven.be/\symbol{126}bartj/verifast/illegal\_access.c}
 \end{center}
 . The program will be shown in the VeriFast IDE. To verify the program,
 choose the \textbf{Verify program} command in the \textbf{Verify} menu,
@@ -143,7 +148,7 @@ press the \textbf{Play} toolbar button, or press F5. You will see
 something like Fig~\ref{figure:illegal-access1}.
 \begin{figure}
 \begin{center}
-\includegraphics[width=7cm]{illegal_access.png}
+\includegraphics[width=10cm]{illegal_access.png}
 \end{center}
 \caption{A screenshot of \texttt{illegal\_access.c} in the VeriFast IDE}\label{figure:illegal-access1}
 \end{figure}
@@ -155,14 +160,13 @@ happens in this case. Notice the following GUI elements:
 \begin{itemize}
 \item The erroneous program element is displayed in a red
     color with a double underline.
-\item The error message states: ``No matching heap chunks:
-    account\_balance''. Indeed, in the scenario where there
+\item The error message states: ``No matching heap chunks: $\mathsf{account\_balance\_(myAccount, \_)}$''. Indeed, in the scenario where there
     is insufficient memory, the memory location (or
     \emph{heap chunk}) that the program attempts to access
     is not accessible to the program.
-    $\mathsf{account\_balance}$ is the type of heap chunk
-    that represents the $\mathsf{balance}$ field of an
-    instance of struct $\mathsf{account}$.
+    $\mathsf{account\_balance\_}$ is the type of heap chunk
+    that represents the (possibly uninitialized) $\mathsf{balance}$ field of the
+    instance of struct $\mathsf{account}$ pointed to by pointer $\mathsf{myAccount}$.
 \item The assignment statement is shown on a yellow
     background. This is because the assignment statement is
     the \emph{current step}. VeriFast verifies each
@@ -184,21 +188,22 @@ press F5 again. We get a green bar: the program now verifies. This means VeriFas
 
 Let's take a closer look at how VeriFast symbolically executed this function. After VeriFast has symbolically executed a program, you can view the \emph{symbolic execution tree} for each function in the Trees pane. The Trees pane is hidden by default, but you can reveal it by dragging the right-hand border of the VeriFast window to the left. At the top of the Trees pane is a drop-down list of all functions that have been symbolically executed. Select the \textsf{Verifying function \lstinline|main|} item to view the symbolic execution tree for function \lstinline|main|.
 
-A symbolic execution tree has three kinds of nodes:
+A symbolic execution tree has four kinds of nodes:
 \begin{itemize}
 \item The \emph{top node} represents the start of the symbolic execution. Click the top node: in the initial symbolic execution state, there are no heap chunks (the Heap chunks pane is empty), there are no local variables (the Locals pane is empty), and there are no assumptions (the Assumptions pane is empty).
-\item There is one \emph{fork node} at each point where a symbolic execution path forks into two paths. This happens when multiple cases need to be considered in the symbolic execution; it is therefore also called a \emph{case split}. The symbolic execution of function \lstinline|main| involves one case split: symbolic execution of a \lstinline|malloc| call forks into one branch where no memory is available and therefore \lstinline|malloc| returns a null pointer, and another branch where memory is available and therefore \lstinline|malloc| allocates the requested amount of memory and returns a pointer to it. (A case split also happens when symbolically executing the \lstinline|if| statement, but since the two cases of the \lstinline|if| statement coincide with the two cases of the \lstinline|malloc| statement, no separate fork node is shown.)
-\item There is one \emph{leaf node} at the end of each complete symbolic execution path through the function. Click any leaf node to see the full corresponding symbolic execution path in the Steps pane.
-Function \lstinline|main| has two symbolic execution paths: the path where no memory is available ends when the program ends due to the call of \lstinline|abort|; the path where memory is available ends when the function returns.
+\item There is one \emph{fork node} at each point where a symbolic execution path forks into two paths. This happens when multiple cases need to be considered in the symbolic execution; it is therefore also called a \emph{case split}. The symbolic execution of function \lstinline|main| involves three case splits: the first case split is where symbolic execution of the \lstinline|malloc| call forks into one branch where no memory is available and therefore \lstinline|malloc| returns a null pointer, and another branch where memory is available and therefore \lstinline|malloc| allocates the requested amount of memory and returns a pointer to it. A case split also happens on each of these branches when symbolically executing the \lstinline|if| statement.
+\item A black \emph{final node} is shown for the final symbolic execution state on each path where additional symbolic execution steps were performed after the last fork. This is the case for one of the branches of each of the two fork nodes corresponding to the \lstinline|if| statement.
+\item There is one green \emph{leaf node} at the end of each complete symbolic execution path through the function. Click the black node preceding any leaf node to see the full corresponding symbolic execution path in the Steps pane.
+Function \lstinline|main| has four symbolic execution paths: two paths end when the \lstinline|if| branch is detected to be inconsistent with the preceding \lstinline|malloc| branch; one path where no memory is available ends when the program ends due to the call of \lstinline|abort|; and a fourth path, where memory is available, ends when the function returns.
 \end{itemize}
 
-Click the rightmost leaf node to view the execution path where \lstinline|malloc| successfully allocates memory. Notice that VeriFast shows arrows in the left margin next to the code of function \lstinline|main| to indicate that this path executes the second case of the \lstinline|malloc| statement and the second case of the \lstinline|if| statement.
+Click the black node preceding the rightmost leaf node to view the (feasible) execution path where \lstinline|malloc| successfully allocates memory. Notice that VeriFast shows arrows in the left margin next to the code of function \lstinline|main| to indicate that this path executes the second case of the \lstinline|malloc| statement and the second case of the \lstinline|if| statement.
 
-To better understand the details of VeriFast's symbolic execution, we will step through this path from the top. Select the first step in the Steps pane. Then, press the Down arrow key. The \textsf{Verifying function \lstinline|main|} step does not affect the symbolic state. The \textsf{Producing assertion} step adds the assumption \textsf{true} to the Assumptions. We will consider production and consumption of assertions in detail later in this tutorial. We now arrive at the \textsf{Executing statement} step for the \lstinline|malloc| statement. This statement affects the symbolic state in three ways:
+To better understand the details of VeriFast's symbolic execution, we will step through this path from the top. Select the first step in the Steps pane. Then, press the Down arrow key. The \textsf{Verifying function \lstinline|main|} step does not affect the symbolic state. The \textsf{Producing assertion} step adds the assumption \textsf{true} to the Assumptions. We will consider production and consumption of assertions in detail later in this tutorial. The first \textsf{Executing statement} step, indicating that we are starting the execution of the function body as a whole, also does nothing. We now arrive at the \textsf{Executing statement} step for the \lstinline|malloc| statement. This statement's effect takes place in the next step, the \textsf{Executing second branch} step; it affects the symbolic state in three ways:
 \begin{itemize}
-\item It adds the heap chunks $\mathsf{account\_balance}(\mathsf{myAccount}, \mathsf{value})$ and $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$ to the symbolic heap (as shown in the Heap chunks pane). Here, $\mathsf{myAccount}$ and $\mathsf{value}$ are \emph{symbols} that represent unknown values. Specifically, $\mathsf{myAccount}$ represents the memory address of the newly allocated struct instance, and $\mathsf{value}$ represents the initial value of the \lstinline|balance| field of the struct instance. (In C, the initial values of the fields of a newly allocated struct instance are unspecified, unlike in Java where the fields of a new object are initialized to the default value of their type.)
+\item It adds the heap chunks $\mathsf{account\_balance\_}(\mathsf{myAccount}, \mathsf{dummy})$ and $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$ to the symbolic heap (as shown in the Heap chunks pane). Here, $\mathsf{myAccount}$ and $\mathsf{dummy}$ are \emph{symbols} that represent unknown values. Specifically, $\mathsf{myAccount}$ represents a pointer to the newly allocated struct instance, and $\mathsf{dummy}$ represents the initial state of the \lstinline|balance| field of the struct instance. (In C, the initial state of the fields of a newly allocated struct instance is unspecified, unlike in Java where the fields of a new object are initialized to the default value of their type. In fact, in C, uninitialized fields might be in a special \emph{poisoned} state whose behavior is different from any initialized state.\footnote{See \url{https://www.ralfj.de/blog/2019/07/14/uninit.html}. We here use the term \emph{poisoned} instead of \emph{uninitialized} to indicate ``a memory state that behaves differently from any initialized state'' because VeriFast allows for the possibility that memory that has not yet been initialized is in fact in a regular state that behaves just like an initialized state.} VeriFast considers reading from poisoned memory to be an error.)
 
-VeriFast \emph{freshly picks} these symbols during this symbolic execution step. That is, to represent the address of the new struct instance and the initial value of the \lstinline|balance| field, VeriFast uses symbols that are not yet being used on this symbolic execution path. To see this, try verifying the function \lstinline|test| shown below:
+VeriFast \emph{freshly picks} these symbols during this symbolic execution step. That is, to represent the location in memory of the new struct instance and the initial state of the \lstinline|balance| field, VeriFast uses symbols that are not yet being used on this symbolic execution path. To see this, try verifying the function \lstinline|test| shown below:
 \begin{lstlisting}
 void test()
     //@ requires true;
@@ -214,7 +219,7 @@ void test()
     }
 }
 \end{lstlisting}
-Notice that to symbolically execute the first \lstinline|malloc| statement, VeriFast picked symbols $\mathsf{myAccount}$ and $\mathsf{value}$, and to symbolically execute the second \lstinline|malloc| statement, VeriFast picked symbols $\mathsf{myAccount0}$ and $\mathsf{value0}$.
+Notice that to symbolically execute the first \lstinline|malloc| statement, VeriFast picked symbols $\mathsf{myAccount}$ and $\mathsf{dummy}$, and to symbolically execute the second \lstinline|malloc| statement, VeriFast picked symbols $\mathsf{myAccount0}$ and $\mathsf{dummy0}$.
 
 \item It adds the assumption $\mathsf{myAccount} \neq 0$ (perhaps written differently) to the path condition (as shown in the Assumptions pane). Indeed, if \lstinline|malloc| succeeds, the returned pointer is not a null pointer.
 \item It adds a binding to the symbolic store (shown in the Locals pane) that binds local variable \lstinline|myAccount| to symbolic value $\mathsf{myAccount}$. Indeed, the program assigns the result of the \lstinline|malloc| call (represented by the symbol $\mathsf{myAccount}$) to the local variable \lstinline|myAccount|. Note that the fact that in this case the local variable and the symbol have the same name is incidental and has no special significance.
@@ -252,9 +257,9 @@ Notice that to symbolically execute the first \lstinline|malloc| statement, Veri
 \end{tabular}}}\\
 \rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\reflectbox{\includegraphics[width=1em]{branch-left.pdf}}}}\quad\quad$ & \lstinline|struct account *myAccount = malloc(sizeof(struct account));|\\[2ex]
 \multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
-\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{value}$\\
+\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{dummy}$\\
 \textbf{Assumptions:} & $\mathsf{myAccount} \neq 0$\\
-\textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, \mathsf{value})$, $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$\\
+\textbf{Heap chunks:} & $\mathsf{account\_balance\_}(\mathsf{myAccount}, \mathsf{dummy})$, $\mathsf{malloc\_block\_account}(\mathsf{myAccount})$\\
 \textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
 \end{tabular}}}
 \end{tabular}
@@ -310,20 +315,20 @@ The next step in the symbolic execution trace is the symbolic execution of the \
 
 Figures~\ref{fig:symexec-if-case1} and \ref{fig:symexec-if-case2} summarize the two cases of the symbolic execution of an \lstinline|if| statement.
 
-The next step of the symbolic execution path symbolically executes the statement that assigns value 5 to the \lstinline|balance| field of the newly allocated struct instance. When symbolically executing an assignment to a field of a struct instance, VeriFast first checks that a heap chunk for that field of that struct instance is present in the symbolic heap. If not, it reports a ``No such heap chunk'' verification failure. It might mean that the program is trying to access unallocated memory. If the chunk is present, VeriFast replaces the second argument of the chunk with the value of the right-hand side of the assignment. This is shown in Figure~\ref{fig:symexec-field-update}.
+The next step of the symbolic execution path symbolically executes the statement that assigns value 5 to the \lstinline|balance| field of the newly allocated struct instance. When symbolically executing an assignment to a field of a struct instance, VeriFast first checks that a (possibly uninitialized) heap chunk for that field of that struct instance is present in the symbolic heap. If not, it reports a ``No such heap chunk'' verification failure. It might mean that the program is trying to access unallocated memory. If the chunk is present, VeriFast replaces the chunk with a (definitely initialized) chunk whose value is the value of the right-hand side of the assignment. This is shown in Figure~\ref{fig:symexec-field-update}. Notice that for any type of chunk named $n$ (such as $\mathsf{account\_balance}$) that represents definitely initialized memory, there is a corresponding type of chunk named $n\mathsf{\_}$ (such as $\mathsf{account\_balance\_}$) that represents possibly uninitialized memory.
 
 \begin{figure}
 \begin{center}
 \begin{tabular}{c @{} l}
 \multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
-\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{value}$\\
+\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{dummy}$\\
 \textbf{Assumptions:}\\
-\textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, \mathsf{value})$\\
+\textbf{Heap chunks:} & $\mathsf{account\_balance\_}(\mathsf{myAccount}, \mathsf{dummy})$\\
 \textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
 \end{tabular}}}\\
 \rule{0pt}{4ex}$\quad\quad\vcenter{\hbox{\includegraphics[width=.5em]{step.pdf}}}\quad\quad$ & \lstinline|myAccount->balance = 5;|\\[2ex]
 \multicolumn{2}{l}{\fbox{\begin{tabular}{l l}
-\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{value}$\\
+\textbf{Symbols:} & $\mathsf{myAccount}$, $\mathsf{dummy}$\\
 \textbf{Assumptions:}\\
 \textbf{Heap chunks:} & $\mathsf{account\_balance}(\mathsf{myAccount}, 5)$\\
 \textbf{Locals:} & \lstinline|myAccount| $\mapsto$ $\mathsf{myAccount}$
@@ -369,27 +374,27 @@ A program's \emph{symbolic execution forest} (consisting of one symbolic executi
   edge [pre] (s1);
 
 \node [state] (s22) [below=of t1] {\begin{tabular}{l @{\ } l}
-\textbf{C:} & $\mathsf{acc\_bal}(1, 33)$, $\mathsf{mb\_acc}(1)$\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\textbf{C:} & $\mathsf{acc\_bal\_}(4_{\#1}, \poison)$, $\mathsf{mb\_acc}(4_{\#1})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $4_{\#1}$
 \end{tabular}}
   edge [pre] (t1);
 \node [state] (s23) [right=of s22] {\begin{tabular}{l @{\ } l}
-\textbf{C:} & $\mathsf{acc\_bal}(2, 77)$, $\mathsf{mb\_acc}(2)$\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\textbf{C:} & $\mathsf{acc\_bal\_}(8_{\#1}, 42)$, $\mathsf{mb\_acc}(8_{\#1})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $8_{\#1}$
 \end{tabular}}
   edge [pre] (t1);
 \node (s24) [right=of s23] {$\cdots$};
 
 \node [state] (s21) [left=of s22] {\begin{tabular}{l @{\ } l}
 \textbf{C:}\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 0
+\textbf{L:} & \lstinline|a| $\mapsto$ $0_{\#0}$
 \end{tabular}}
   edge [pre] (t1);
 \node [transitionV] (t21) [below=of s21, label=right:\parbox{5cm}{\lstinline|if (a == 0)|}] {}
   edge [pre] (s21);
 \node [state] (s31) [below=of t21] {\begin{tabular}{l @{\ } l}
 \textbf{C:}\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 0
+\textbf{L:} & \lstinline|a| $\mapsto$ $0_{\#0}$
 \end{tabular}}
   edge [pre] (t21);
 \node [transitionV] (t31) [below=of s31, label=right:\parbox{5cm}{\lstinline|abort();|}] {}
@@ -398,22 +403,22 @@ A program's \emph{symbolic execution forest} (consisting of one symbolic executi
 \node [transitionV] (t22) [below=of s22, label=right:\parbox{5cm}{\lstinline|if (a == 0) \{ ... \}|}] {}
   edge [pre] (s22);
 \node [state] (s32) [below=of t22] {\begin{tabular}{l @{\ } l}
-\textbf{C:} & $\mathsf{acc\_bal}(1, 33)$, $\mathsf{mb\_acc}(1)$\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\textbf{C:} & $\mathsf{acc\_bal\_}(4_{\#1}, \poison)$, $\mathsf{mb\_acc}(4_{\#1})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $4_{\#1}$
 \end{tabular}}
   edge [pre] (t22);
 \node [transitionV] (t32) [below=of s32, label=right:\parbox{5cm}{\lstinline|a->bal = 5;|}] {}
   edge [pre] (s32);
 \node [state] (s42) [below=of t32] {\begin{tabular}{l @{\ } l}
-\textbf{C:} & $\mathsf{acc\_bal}(1, 5)$, $\mathsf{mb\_acc}(1)$\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\textbf{C:} & $\mathsf{acc\_bal}(4_{\#1}, 5)$, $\mathsf{mb\_acc}(4_{\#1})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $4_{\#1}$
 \end{tabular}}
   edge [pre] (t32);
 \node [transitionV] (t42) [below=of s42, label=right:\parbox{5cm}{\lstinline|free(a);|}] {}
   edge [pre] (s42);
 \node [state] (s52) [below=of t42] {\begin{tabular}{l @{\ } l}
 \textbf{C:}\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 1
+\textbf{L:} & \lstinline|a| $\mapsto$ $4_{\#1}$
 \end{tabular}}
   edge [pre] (t42);
 \node [transitionV] (t52) [below=of s52, label=right:\parbox{5cm}{\lstinline|return 0;|}] {}
@@ -427,22 +432,22 @@ A program's \emph{symbolic execution forest} (consisting of one symbolic executi
 \node [transitionV] (t23) [below=of s23, label=right:\parbox{5cm}{\lstinline|if (a == 0) \{ ... \}|}] {}
   edge [pre] (s23);
 \node [state] (s33) [below=of t23] {\begin{tabular}{l @{\ } l}
-\textbf{C:} & $\mathsf{acc\_bal}(2, 77)$, $\mathsf{mb\_acc}(2)$\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\textbf{C:} & $\mathsf{acc\_bal\_}(8_{\#1}, 42)$, $\mathsf{mb\_acc}(8_{\#1})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $8_{\#1}$
 \end{tabular}}
   edge [pre] (t23);
 \node [transitionV] (t33) [below=of s33, label=right:\parbox{5cm}{\lstinline|a->bal = 5;|}] {}
   edge [pre] (s33);
 \node [state] (s43) [below=of t33] {\begin{tabular}{l @{\ } l}
-\textbf{C:} & $\mathsf{acc\_bal}(2, 5)$, $\mathsf{mb\_acc}(2)$\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\textbf{C:} & $\mathsf{acc\_bal}(8_{\#1}, 5)$, $\mathsf{mb\_acc}(8_{\#1})$\\
+\textbf{L:} & \lstinline|a| $\mapsto$ $8_{\#1}$
 \end{tabular}}
   edge [pre] (t33);
 \node [transitionV] (t43) [below=of s43, label=right:\parbox{5cm}{\lstinline|free(a);|}] {}
   edge [pre] (s43);
 \node [state] (s53) [below=of t43] {\begin{tabular}{l @{\ } l}
 \textbf{C:}\\
-\textbf{L:} & \lstinline|a| $\mapsto$ 2
+\textbf{L:} & \lstinline|a| $\mapsto$ $8_{\#1}$
 \end{tabular}}
   edge [pre] (t43);
 \node [transitionV] (t53) [below=of s53, label=right:\parbox{5cm}{\lstinline|return 0;|}] {}
@@ -454,7 +459,7 @@ A program's \emph{symbolic execution forest} (consisting of one symbolic executi
   edge [pre] (t53);
 \end{tikzpicture}
 \end{center}
-\caption{Concrete execution tree of the program of Figure~\ref{figure:illegal-access1} (after uncommenting the \lstinline|if| statement). We abbreviate \textbf{Chunks} as \textbf{C}, \textbf{Locals} as \textbf{L}, \lstinline|account| as \lstinline|acc|, \lstinline|balance| as \lstinline|bal|, \lstinline|myAccount| as \lstinline|a|, and $\mathsf{malloc\_block}$ as $\mathsf{mb}$. Note that the tree is not shown fully: the \lstinline|malloc| node has one child node for each combination $(\ell, v)$ of an address $\ell$ for the new account and an initial value $v$ of its \lstinline|balance| field.}\label{fig:concrete-execution-tree}
+\caption{Concrete execution tree of the program of Figure~\ref{figure:illegal-access1} (after uncommenting the \lstinline|if| statement). We abbreviate \textbf{Chunks} as \textbf{C}, \textbf{Locals} as \textbf{L}, \lstinline|account| as \lstinline|acc|, \lstinline|balance| as \lstinline|bal|, \lstinline|myAccount| as \lstinline|a|, and $\mathsf{malloc\_block}$ as $\mathsf{mb}$. Note that the tree is not shown fully: the \lstinline|malloc| node has one child node for each combination $(\ell, s)$ of a memory location $\ell$ for the new account and an initial state $s$ of its \lstinline|balance| field. Note that in C, a pointer/memory location $\ell = a_p$ consists of an \emph{address} $a$ and a \emph{provenance} $p$; see \url{https://www.ralfj.de/blog/2018/07/24/pointers-and-bytes.html}. The null pointer has address 0 and special provenance $\#0$. Pointers to allocated memory blocks have as their provenance the allocation identifier ($\#1$ is the provenance of the first block allocated by the program) and have a nondeterministically selected address; the diagram shows 4 and 8 as examples of such addresses for conciseness (although in reality pointers returned by \lstinline|malloc| are properly aligned for any type, so they should be multiples of 8 at the very least). (Note: the provenance model suggested here is just an example; in reality, VeriFast abstracts over the precise provenance model, and in fact, by specifying \lstinline|-assume_no_provenance| on the command line, you can make VeriFast assume (unsoundly!) that all pointers have the same provenance $\#0$.) The initial state $s$ of a memory location can be the poisoned state ($\poison$) or some value, e.g. 42.}\label{fig:concrete-execution-tree}
 \end{figure}
 
 The concrete execution tree of the corrected version of the program of Figure~\ref{figure:illegal-access1} is shown in Figure~\ref{fig:concrete-execution-tree}. Notice that it is in fact (practically) infinite-width. For this example program, the concrete execution tree is not infinite-depth, because the program has no loops or recursion. If the program had a loop with an unbounded number of iterations, the tree would have been infinite-depth as well.
@@ -466,7 +471,7 @@ Draw the symbolic execution tree of the \lstinline|main| function of the correct
 \section{malloc\_block Chunks}\label{section:malloc_block}
 
 To better understand why the $\mathit{malloc}$ statement
-generates both an $\mathsf{account\_balance}$ chunk and a
+generates both an $\mathsf{account\_balance\_}$ chunk and a
 $\mathsf{malloc\_}$\-$\mathsf{block\_account}$ chunk, change
 the program so that the struct instance is allocated as a local
 variable on the stack instead of being allocated on the heap:
@@ -505,7 +510,7 @@ allocated on the stack. 2) When verifying a $\mathit{free}$
 statement, VeriFast checks that a $\mathsf{malloc\_block}$
 chunk exists for the struct instance being freed.
 
-Notice that, in contrast, the $\mathsf{account\_balance}$ chunk
+Notice that, in contrast, the $\mathsf{account\_balance\_}$ chunk
 is generated in both cases. As a result, the statement that
 initializes the $\mathsf{balance}$ field verifies successfully,
 regardless of whether the struct instance was allocated on the
@@ -576,15 +581,15 @@ $\mathsf{myAccount}$. We achieve this simply by mentioning the
 heap chunk in the precondition:
 \begin{lstlisting}
 void account_set_balance(struct account *myAccount, int newBalance)
-    //@ requires account_balance(myAccount, _);
+    //@ requires account_balance_(myAccount, _);
     //@ ensures true;
 \end{lstlisting}
 Notice that we use an underscore in the position where the
-value of the field belongs. This indicates that we do not care
-about the old value of the field when the function is
+state of the field belongs. This indicates that we do not care
+about the old state of the field when the function is
 called.\footnote{VeriFast also supports a more concise syntax
 for field chunks. For example,
-\lstinline!account_balance(myAccount, _)! can also be written as
+\lstinline!account_balance_(myAccount, _)! can also be written as
 \lstinline!myAccount->balance |-> _!.
 In fact, the latter (field chunk-specific) syntax is generally recommended
 over the former (generic chunk) syntax because it causes
@@ -602,7 +607,7 @@ that we're happy to leak this heap chunk. We will come back to
 this later.
 \begin{lstlisting}
 void account_set_balance(struct account *myAccount, int newBalance)
-    //@ requires account_balance(myAccount, _);
+    //@ requires account_balance_(myAccount, _);
     //@ ensures true;
 {
     myAccount->balance = newBalance;
@@ -621,7 +626,7 @@ find out by stepping through the symbolic execution path.
 Select the second step. The $\mathsf{malloc}$ statement is about
 to be executed and the symbolic heap is empty. Select the next
 step. The $\mathsf{malloc}$ statement has added the
-$\mathsf{account\_balance}$ chunk and the
+$\mathsf{account\_balance\_}$ chunk and the
 $\mathsf{malloc\_block\_account}$ chunk.
 
 The if statement has no effect.
@@ -660,7 +665,7 @@ part of the contract being consumed or produced is shown on a
 yellow background. If you move from the ``Consuming assertion''
 step to the ``Producing assertion'' step, you notice that the
 ``Consuming assertion'' step removes the
-$\mathsf{account\_balance}$ chunk from the symbolic heap.
+$\mathsf{account\_balance\_}$ chunk from the symbolic heap.
 Conceptually, it is now in use by the
 $\mathsf{account\_set\_balance}$ function while the
 $\mathsf{main}$ function waits for this function to return.
@@ -683,7 +688,7 @@ that the function must hand back the
 $\mathsf{account\_balance}$ chunk to its caller.
 \begin{lstlisting}
 void account_set_balance(struct account *myAccount, int newBalance)
-    //@ requires account_balance(myAccount, _);
+    //@ requires account_balance_(myAccount, _);
     //@ ensures account_balance(myAccount, newBalance);
 {
     myAccount->balance = newBalance;
@@ -740,11 +745,11 @@ VeriFast is asked to check a condition, it first translates the
 condition to a logical formula, by replacing each variable by
 its symbolic value. We can see in the symbolic store, displayed
 in the Locals pane, that the symbolic value of variable
-$\mathsf{b}$ is the logical symbol $\mathsf{b}$. Therefore, the
-resulting logical formula is \lstinline!b == 5!. VeriFast then
+\lstinline|b| is the logical symbol $\mathsf{b}$. Therefore, the
+resulting logical formula is $\mathsf{b} = 5$. VeriFast then
 attempts to derive this formula from the \emph{path condition},
 i.e., the formulae shown in the Assumptions pane. Since the
-only assumption in this case is \lstinline!true!, VeriFast
+only assumption in this case is $\mathsf{true}$, VeriFast
 cannot prove the condition.
 
 The problem is that the postcondition of function
@@ -1353,7 +1358,7 @@ predicate lseg(struct node *first, struct node *last, int count) =
         count == 0
     :
         0 < count &*& first != 0 &*&
-        first->value |-> _ &*& first->next |-> ?next &*& malloc_block_node(first) &*&
+        first->value |-> ?value &*& first->next |-> ?next &*& malloc_block_node(first) &*&
         lseg(next, last, count - 1);
 \end{lstlisting}
 We are not done yet. We need to establish the loop invariant
@@ -1454,7 +1459,7 @@ We are almost done. All that is left to do is to fix the error
 that we get at the end of the loop body. At that point, we have
 the following chunks:
 \begin{lstlisting}
-lseg(head, ?old_n, i - 1) &*& old_n->value |-> _ &*& old_n->next |-> n &*&
+lseg(head, ?old_n, i - 1) &*& old_n->value |-> ?value &*& old_n->next |-> n &*&
 malloc_block_node(old_n) &*& lseg(n, 0, count - i)
 \end{lstlisting}
 We need to transform these into the following:
@@ -1468,8 +1473,8 @@ for this. Here's a first attempt:
 \begin{lstlisting}
 lemma void lseg_add_lemma(struct node *first)
     requires
-        lseg(first, ?last, ?count) &*& last != 0 &*& last->value |-> _ &*& last->next |-> ?next &*&
-        malloc_block_node(last);
+        lseg(first, ?last, ?count) &*& last != 0 &*& last->value |-> ?value &*&
+        last->next |-> ?next &*& malloc_block_node(last);
     ensures lseg(first, next, count + 1);
 {
     open lseg(first, last, count);
@@ -1505,8 +1510,8 @@ We obtain the following \lstinline!lseg_add_lemma! and
 /*@
 lemma void lseg_add_lemma(struct node *first)
     requires
-        lseg(first, ?last, ?count) &*& last != 0 &*& last->value |-> _ &*& last->next |-> ?next &*&
-        malloc_block_node(last) &*& lseg(next, 0, ?count0);
+        lseg(first, ?last, ?count) &*& last != 0 &*& last->value |-> ?value &*&
+        last->next |-> ?next &*& malloc_block_node(last) &*& lseg(next, 0, ?count0);
     ensures lseg(first, next, count + 1) &*& lseg(next, 0, count0);
 {
     open lseg(first, last, count);
@@ -1789,17 +1794,14 @@ chunk.
 Verify function \lstinline!nodes_filter!.
 \end{exercise}
 
-Note: VeriFast currently supports the dereference
-(\lstinline!*!) operator only for pointers to pointers,
-pointers to integers, and pointers to characters.
-In the latter cases, the following
-predicates are used, also defined in \texttt{prelude.h}:
+Note: in the same way that field chunk assertions can be written more elegantly using a points-to syntax, generic variable chunk assertions can be written using a points-to syntax as well. For example, we can also write the spec of \lstinline!nodes_filter! as follows:
 \begin{lstlisting}
-predicate integer(int *p; int v);
-predicate character(char *p; char v);
+void nodes_filter(struct node **n, int_predicate *p)
+    //@ requires *n |-> ?node &*& nodes(node, _) &*& is_int_predicate(p) == true;
+    //@ ensures *n |-> ?node0 &*& nodes(node0, _);
 \end{lstlisting}
-VeriFast does not yet support taking the address of a local
-variable.
+
+This has the advantage that it automatically desugars to the correct type of variable chunk (e.g.~$\mathsf{integer}$ for variables of type \verb!int! and $\mathsf{character}$ for variables of type \verb!char!).
 
 \section{Arithmetic Overflow}
 
@@ -1809,92 +1811,97 @@ int main()
     //@ requires true;
     //@ ensures true;
 {
-    int x = 2000000000 + 2000000000;
-    assert(0 <= x);
-    return 0;
+    int a = 30000;
+    int b = 30000;
+    int c = a + b;
+    return b < c;
 }
 \end{lstlisting}
 The behavior of this program is not uniquely defined by the C
-language. Specifically, the \lstinline!int! type supports only
+language. Specifically, C's integer types, such as \lstinline!int!, support only
 a finite range of integers, and furthermore the C language does
 not specify the bounds of this range. The bounds are
 \emph{implementation-dependent}. The C language does specify
-that the least and greatest value of type \lstinline!int! are
-given by the macros \lstinline!INT_MIN! and
-\lstinline!INT_MAX!, respectively, and that \lstinline!INT_MIN!
-is not greater than -32767 and that \lstinline!INT_MAX! is not
-less than 32767. Furthermore, the C language does not specify
-what happens if an arithmetic operation on type \lstinline!int!
-yields a value that is not within the limits of type
-\lstinline!int!.
+that the minimum and maximum value of type \lstinline!int! are
+given by the macros \lstinline!INT_MIN! and \lstinline!INT_MAX! defined in header \verb|limits.h|, and that \lstinline!INT_MIN!
+is not greater than $-32768$ and that \lstinline|INT_MAX| is not less than 32767. On a modern desktop or server platform, where \lstinline|INT_MAX| equals $2^{31}-1$ (more than $2\times10^9$), the value of variable \lstinline|c| is 60000, and this program returns 1, but on platforms where \lstinline|INT_MAX| equals 32767, such as embedded platforms based on the AVR microcontroller, the mathematical result of the addition is outside the limits of type \lstinline|int| and this program has \emph{undefined behavior}; indeed, the C language specification allows compilers to perform optimizations that assume that arithmetic operations on (signed) integers never overflow, so compilers are allowed to miscompile the example program in arbitrary ways.
 
-VeriFast does not attempt to be sound with respect to arbitrary
-C implementations (or even with respect to arbitrary
-standard-compliant ones). Specifically, it assumes that
-\lstinline!INT_MIN! equals $-2^{31}$ and \lstinline!INT_MAX!
-equals $2^{31}-1$.
+VeriFast assumes that for each signed integer type $T$, $T$\texttt{\_MIN}${} = -2^{8\times\texttt{sizeof($T$)} - 1}$ and $\texttt{$T$\_MAX} = 2^{8\times\texttt{sizeof($T$)} - 1} - 1$, and for each unsigned integer type $T$, $\texttt{$T$\_MAX} = 2^{8\times\texttt{sizeof($T$)}} - 1$. Furthermore, it treats \lstinline!char! as a synonym of \lstinline!signed char! and \lstinline!size_t! as a synonym of \lstinline!uintptr_t! and it currently supports the following target platforms\footnote{VeriFast supports \texttt{32bit} as a synonym for \texttt{ILP32}, \texttt{Win64} as a synonym for \texttt{LLP64}, and \texttt{Unix64}, \texttt{Linux64}, \texttt{OSX}, and \texttt{MacOS} as synonyms for \texttt{LP64}.}, given with the value of \texttt{sizeof($T$)} for various types $T$:
 
-When symbolically evaluating an arithmetic operation in C code
-(i.e., not in an annotation), VeriFast checks that the result
-of the operation fits within the bounds of the result type,
-unless arithmetic overflow checking has been turned off in the
-\textbf{Verify} menu. As a result, VeriFast rejects the above
-program. It also rejects the following program:
+\begin{center}
+\begin{tabular}{ |c|c|c|c|c|c|c| }
+ \hline
+ Target & \texttt{short} & \texttt{int} & \texttt{long} & \texttt{size\_t} & \texttt{long long} \\ 
+ \hline
+ \verb|IP16| & 2 & 2 & 4 & 2 & 8 \\ 
+ \verb|I16| & 2 & 2 & 4 & 4 & 8 \\
+ \verb|ILP32| & 2 & 4 & 4 & 4 & 8 \\ 
+ \verb|LLP64| & 2 & 4 & 4 & 8 & 8 \\
+ \verb|LP64| & 2 & 4 & 8 & 8 & 8 \\
+ \hline
+\end{tabular}
+\end{center}
+
+By default, VeriFast verifies the program in a way that is intended to be sound with respect to all of these targets (but not necessarily with respect to other targets allowed by the C standard). If you are only targeting one of these platforms, specify it using the \texttt{-target} command-line option.
+
+By default, VeriFast considers arithmetic overflow to be an error. Therefore, symbolic execution of the addition in the above program fails, unless the \texttt{-target} command-line option is used to specify a target where $\texttt{sizeof(int)} > 2$, or VeriFast is told to assume arithmetic overflow never happens using the \verb|-disable_overflow_check| option. If the program performs arithmetic overflow intentionally in order to cause modulo behavior (also known as \emph{wraparound behavior}, which means that if the mathematical result of the operation is outside the limits of the type, the expression evaluates to a value obtained by adding or subtracting $2^{8\times\texttt{sizeof($T$)}}$ to the mathematical result as many times as necessary to bring it within the limits of the type), this can be indicating by writing \lstinline|/*@truncating@*/ (a + b)|. Note: in the case of signed integer types, truncating expressions are allowed only if \verb|-fwrapv| is specified on the command line; indeed, as mentioned above, absent this compiler flag signed integer overflow is undefined behavior.
+
+As another example, consider the following function:
 \begin{lstlisting}
 void int_add(int *x, int *y)
-    //@ requires integer(x, ?vx)   &*& integer(y, ?vy);
-    //@ ensures  integer(x, vx+vy) &*& integer(y,  vy);
+    //@ requires integer(x, ?vx) &*& integer(y, ?vy);
+    //@ ensures integer(x, vx + vy) &*& integer(y, vy);
 {
-    int x_deref = *x;
-    int y_deref = *y;
-    *x = x_deref + y_deref;
+    int xv = *x;
+    int yv = *y;
+    *x = xv + yv;
 }
 \end{lstlisting}
-Let's try to fix this function so that it works correctly on a
-32-bit machine. Here's a first attempt:
+This function has undefined behavior and is rejected by VeriFast. (Note: inside annotations, arithmetic operations are interpreted mathematically, so the expression \verb|vx + vy| in the \verb|ensures| clause has the mathematical meaning regardless of the C type of this expression; it follows that the values of expressions inside annotations are not necessarily within the limits of their C type.)
+
+Let's try to fix this function. Here's a first attempt:
 \begin{lstlisting}
 #include "stdlib.h"
-void int_add(int *x_ptr, int *y_ptr)
-    //@ requires integer(x_ptr, ?x_value)        &*& integer(y_ptr, ?y_value);
-    //@ ensures  integer(x_ptr, x_value+y_value) &*& integer(y_ptr,  y_value);
+void int_add(int *x, int *y)
+    //@ requires integer(x, ?vx) &*& integer(y, ?vy);
+    //@ ensures integer(x, vx + vy) &*& integer(y, vy);
 {
-    int x = *x_ptr;
-    int y = *y_ptr;
-    if (0 <= x) {
-        if (INT_MAX - x < y) abort();
+    int xv = *x;
+    int yv = *y;
+    if (0 <= xv) {
+        if (INT_MAX - xv < yv) abort();
     } else {
-        if (y < INT_MIN - x) abort();
+        if (yv < INT_MIN - xv) abort();
     }
-    *x_ptr = x + y;
+    *x = xv + yv;
 }
 \end{lstlisting}
-Even though this function works correctly on a 32-bit machine,
+Even though this function is now correct,
 VeriFast does not accept it. This is because VeriFast checks
 that the results of the arithmetic operations are within the
 bounds of the type, but it does not assume that the original
 values are within the bounds of the type. These assumptions are
-not generated automatically for verification performance
-reasons. In order to generate these assumptions, we must insert
+not generated automatically in general. In order to generate these assumptions, we must insert
 \lstinline!produce_limits! ghost commands into the code. The
 argument of a \lstinline!produce_limits! command must be the
 name of a C local variable (i.e., not a local variable declared
 in an annotation). The following program verifies.
 \begin{lstlisting}
 #include "stdlib.h"
-void int_add(int *x_ptr, int *y_ptr)
-    //@ requires integer(x_ptr, ?x_value)        &*& integer(y_ptr, ?y_value);
-    //@ ensures  integer(x_ptr, x_value+y_value) &*& integer(y_ptr,  y_value);
+void int_add(int *x, int *y)
+    //@ requires integer(x, ?vx) &*& integer(y, ?vy);
+    //@ ensures integer(x, vx + vy) &*& integer(y, vy);
 {
-    int x = *x_ptr;
-    int y = *y_ptr;
-    //@ produce_limits(x);
-    //@ produce_limits(y);
-    if (0 <= x) {
-        if (INT_MAX - x < y) abort();
+    int xv = *x;
+    //@ produce_limits(xv);
+    int yv = *y;
+    //@ produce_limits(yv);
+    if (0 <= xv) {
+        if (INT_MAX - xv < yv) abort();
     } else {
-        if (y < INT_MIN - x) abort();
+        if (yv < INT_MIN - xv) abort();
     }
-    *x_ptr = x + y;
+    *x = xv + yv;
 }
 \end{lstlisting}
 
@@ -1910,7 +1917,25 @@ Note: in case an \lstinline!integer!, \lstinline!character! or
 \lstinline!pointer! chunk is on the heap, one can also use
 the lemmas \lstinline!integer_limits!, \lstinline!character_limits!
 and \lstinline!pointer_limits! respectively. The contracts
-of these lemmas can be read in the file \texttt{prelude.h}.
+of these lemmas can be found in the file \texttt{prelude.h}.
+
+Also, the limits of the values of variables \emph{are} produced automatically if the points-to syntax is used to assert the chunks. The following verifies:
+\begin{lstlisting}
+#include "stdlib.h"
+void int_add(int *x, int *y)
+    //@ requires *x |-> ?vx &*& *y |-> ?vy;
+    //@ ensures *x |-> vx + vy &*& *y |-> vy;
+{
+    int xv = *x;
+    int yv = *y;
+    if (0 <= xv) {
+        if (INT_MAX - xv < yv) abort();
+    } else {
+        if (yv < INT_MIN - xv) abort();
+    }
+    *x = xv + yv;
+}
+\end{lstlisting}
 
 \section{Predicate Families}\label{section:predicate-families}
 
@@ -2548,13 +2573,7 @@ able to get a speedup if we distribute the work amongst two
 threads, which may then be scheduled by the operating system on
 both cores simultaneously.
 
-Unfortunately, the C language does not define a standard
-mechanism for writing multithreaded programs.\footnote{The
-recent C standard revision C11 introduces support for
-multithreading, but it is not yet widely supported.}
-Programs for
-Windows can use the Windows API, and programs for Unix-like
-operating systems can typically use the POSIX pthreads API.
+Unfortunately, writing multithreaded programs currently requires using platform-specific APIs.\footnote{The 2011 edition of the C programming language standard introduced a standard multithreading library, but it is still not supported on all important platforms.}
 However, the VeriFast distribution includes a wrapper around
 these APIs that offers a uniform interface across all supported
 platforms. It is defined in \texttt{threading.h} and
@@ -3088,8 +3107,8 @@ predicate tree(struct tree *t; int depth) =
     t == 0 ?
         depth == 0
     :
-        t->left |-> ?left &*& t->right |-> ?right &*& t->value |-> _ &*& malloc_block_tree(t) &*&
-        tree(left, ?childDepth) &*& tree(right, childDepth) &*& depth == childDepth + 1;
+        t->left |-> ?l &*& t->right |-> ?r &*& t->value |-> ?v &*& malloc_block_tree(t) &*&
+        tree(l, ?childDepth) &*& tree(r, childDepth) &*& depth == childDepth + 1;
 \end{lstlisting}
 Notice that we rephrased the body of the predicate slightly so
 that it is accepted by VeriFast's preciseness analysis. The
@@ -3207,10 +3226,7 @@ When a thread attempts to acquire a mutex, there are two cases.
     and the program is terminated.
 \end{itemize}
 
-The C language does not itself offer any synchronization
-constructs; rather, the operating system does. For example, the
-Windows API offers a mutex construct called critical sections,
-and the Linux API offers a mutex construct called mutexes. To
+Currently performing synchronization in C programs requires using platform-specific APIs.\footnote{The 2011 edition of the C programming language standard introduced a standard synchronization library, but it is still not supported on all important platforms.} To
 enable a uniform interface across all platforms, VeriFast
 includes a module \texttt{threading.c} that offers two
 synchronization constructs: mutexes and locks. The only
@@ -4099,11 +4115,7 @@ ghost commands before the loop exit (i.e., the
 \begin{exercise}\label{exercise:memcmp}
 Specify and verify that the following implementation of
 function \lstinline|memcmp| returns zero if and only if the two
-arrays have the same contents. Note: if a boolean expression in
-an assertion starts with a parenthesis, you must prefix the
-boolean expression with \lstinline|true ==|, e.g.
-\lstinline|true == ((a == b) == (c == d))|; this is a
-limitation of the VeriFast parser.
+arrays have the same contents.
 \begin{lstlisting}
 int memcmp(char *p1, char *p2, int count) {
     int result = 0;
@@ -4311,8 +4323,8 @@ do we specify this? How does VeriFast represent the array
 allocated by the \lstinline!malloc! statement? In fact, if a
 \lstinline!malloc! call is of the form %
 \lstinline!T **x = malloc(n * sizeof(T *))!, VeriFast produces
-a \lstinline!pointers(x, n, _)! chunk. Predicate
-\lstinline!pointers! is defined in \lstinline!prelude.h! and is
+a \lstinline!pointers_(x, n, _)! chunk. Predicates
+\lstinline!pointers_! and \lstinline|pointers| are defined in \lstinline!prelude.h!; predicate \lstinline!pointers! is
 analogous to predicate \lstinline!chars! (see
 Section~\ref{section:memcpy}):
 \begin{lstlisting}
@@ -4322,6 +4334,7 @@ predicate pointers(void **pp, int count; list<void *> ps) =
     :
         pointer(pp, ?p) &*& pointers(pp + 1, count - 1, ?ps0) &*& ps == cons(p, ps0);
 \end{lstlisting}
+Predicate \lstinline!pointers_! is the corresponding predicate for possibly-uninitialized memory.
 Like for \lstinline!chars! chunks, VeriFast supports array
 slice syntax for \lstinline!pointers! chunks: the notation
 \lstinline!a[i..n] |->! \lstinline!?ps! where \lstinline!a! is
@@ -4391,7 +4404,7 @@ for (int i = 0; ; i++)
     //@ requires names[i..n] |-> _;
     //@ ensures names[old_i..n] |-> ?ps &*& foreachp(ps, student);
 {
-    //@ open pointers(_, _, _);
+    //@ open pointers_(_, _, _);
     if (i == n) {
         break;
     }
@@ -4542,9 +4555,9 @@ See Figure~\ref{fig:symex-tree}. Note: there are many alternative ways to expres
   edge [pre] (s1);
 
 \node [state] (s22) [below right=of t1] {\begin{tabular}{l @{\ } l}
-\textbf{S:} & $\mathsfsl{a}, \mathsfsl{v}$\\
+\textbf{S:} & $\mathsfsl{a}, \mathsfsl{s}$\\
 \textbf{A:} & $\mathsfsl{a} \neq 0$\\
-\textbf{C:} & $\mathsf{acc\_bal}(\mathsfsl{a}, \mathsfsl{v})$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
+\textbf{C:} & $\mathsf{acc\_bal\_}(\mathsfsl{a}, \mathsfsl{s})$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
 \textbf{L:} & \lstinline|a| $\mapsto$ $\mathsfsl{a}$
 \end{tabular}}
   edge [pre] (t1);
@@ -4571,9 +4584,9 @@ See Figure~\ref{fig:symex-tree}. Note: there are many alternative ways to expres
 \node [transitionV] (t22) [below=of s22, label=right:\parbox{5cm}{\lstinline|if (a == 0) \{ ... \}|}] {}
   edge [pre] (s22);
 \node [state] (s32) [below=of t22] {\begin{tabular}{l @{\ } l}
-\textbf{S:} & $\mathsfsl{a}, \mathsfsl{v}$\\
+\textbf{S:} & $\mathsfsl{a}, \mathsfsl{s}$\\
 \textbf{A:} & $\mathsfsl{a} \neq 0$\\
-\textbf{C:} & $\mathsf{acc\_bal}(\mathsfsl{a}, \mathsfsl{v})$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
+\textbf{C:} & $\mathsf{acc\_bal\_}(\mathsfsl{a}, \mathsfsl{s})$, $\mathsf{mb\_acc}(\mathsfsl{a})$\\
 \textbf{L:} & \lstinline|a| $\mapsto$ $\mathsfsl{a}$
 \end{tabular}}
   edge [pre] (t22);
@@ -5152,7 +5165,7 @@ void stack_push_all(struct stack *stack, struct stack *other)
             /*@
             invariant
                 lseg(head0, n, ?count1) &*&
-                n != 0 &*& n->value |-> _ &*& n->next |-> ?next &*& malloc_block_node(n) &*&
+                n != 0 &*& n->value |-> ?value &*& n->next |-> ?next &*& malloc_block_node(n) &*&
                 lseg(next, 0, count0 - count1 - 1);
             @*/
         {
@@ -5657,8 +5670,8 @@ struct tree {
     t == 0 ?
         depth == 0
     :
-        t->left |-> ?left &*& t->right |-> ?right &*& t->value |-> _ &*& malloc_block_tree(t) &*&
-        tree(left, depth - 1) &*& tree(right, depth - 1);
+        t->left |-> ?left &*& t->right |-> ?right &*& t->value |-> ?value &*&
+        malloc_block_tree(t) &*& tree(left, depth - 1) &*& tree(right, depth - 1);
 @*/
 
 struct tree *make_tree(int depth)
@@ -5724,7 +5737,7 @@ struct sum_data {
 predicate_family_instance thread_run_pre(summator)(struct sum_data *data, any info) =
     data->tree |-> ?tree &*& tree(tree, _) &*& data->sum |-> _;
 predicate_family_instance thread_run_post(summator)(struct sum_data *data, any info) =
-    data->tree |-> ?tree &*& tree(tree, _) &*& data->sum |-> _;
+    data->tree |-> ?tree &*& tree(tree, _) &*& data->sum |-> ?sum;
 
 @*/
 
@@ -5813,10 +5826,10 @@ struct fold_data {
 
 predicate_family_instance thread_run_pre(folder)(struct fold_data *data, any info) =
     data->tree |-> ?tree &*& tree(tree, _) &*&
-    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> ?acc;
 predicate_family_instance thread_run_post(folder)(struct fold_data *data, any info) =
     data->tree |-> ?tree &*& tree(tree, _) &*&
-    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> ?acc;
 
 @*/
 
@@ -5898,10 +5911,10 @@ fractions.c}\label{solution:fractions}
 
 predicate_family_instance thread_run_pre(folder)(struct fold_data *data, any info) =
     data->tree |-> ?tree &*& [1/2]tree(tree, _) &*&
-    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> ?acc;
 predicate_family_instance thread_run_post(folder)(struct fold_data *data, any info) =
     data->tree |-> ?tree &*& [1/2]tree(tree, _) &*&
-    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> _;
+    data->f |-> ?f &*& is_fold_function(f) == true &*& data->acc |-> ?acc;
 
 @*/
 
@@ -5968,7 +5981,7 @@ struct counter {
     struct mutex *mutex;
 };
 
-//@ predicate_ctor counter(struct counter *counter)() = counter->count |-> _;
+//@ predicate_ctor counter(struct counter *counter)() = counter->count |-> ?count;
 
 struct count_pulses_data {
     struct counter *counter;
@@ -5978,7 +5991,8 @@ struct count_pulses_data {
 /*@
 
 predicate_family_instance thread_run_data(count_pulses)(struct count_pulses_data *data) =
-    data->counter |-> ?counter &*& data->source |-> _ &*& malloc_block_count_pulses_data(data) &*&
+    malloc_block_count_pulses_data(data) &*&
+    data->counter |-> ?counter &*& data->source |-> ?source &*&
     [1/2]counter->mutex |-> ?mutex &*& [1/3]mutex(mutex, counter(counter));
 
 @*/
@@ -6074,7 +6088,7 @@ struct counter {
     struct mutex *mutex;
 };
 
-//@ predicate_ctor counter(struct counter *counter)() = counter->count |-> _;
+//@ predicate_ctor counter(struct counter *counter)() = counter->count |-> ?count;
 
 struct count_pulses_data {
     struct counter *counter;
@@ -6084,7 +6098,8 @@ struct count_pulses_data {
 /*@
 
 predicate_family_instance thread_run_data(count_pulses)(struct count_pulses_data *data) =
-    data->counter |-> ?counter &*& data->source |-> _ &*& malloc_block_count_pulses_data(data) &*&
+    malloc_block_count_pulses_data(data) &*&
+    data->counter |-> ?counter &*& data->source |-> ?source &*&
     [_]counter->mutex |-> ?mutex &*& [_]mutex(mutex, counter(counter));
 
 @*/

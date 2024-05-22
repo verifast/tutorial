@@ -4538,6 +4538,8 @@ directory \lstinline!tutorial! of the VeriFast distribution).
 
 \section{Solutions to Exercises}
 
+Note: all of the solutions are also available in directory \verb|tutorial_solutions| of the VeriFast distribution.
+
 \subsection{Exercise \ref{exercise:symex-tree}}
 
 See Figure~\ref{fig:symex-tree}. Note: there are many alternative ways to express this symbolic execution tree that are equivalent. In particular, replacing a symbolic state by an equivalent one yields an equivalent symbolic execution tree. Two symbolic states are equivalent if they denote the same set of concrete states. For example, if there is only one value $v$ for some symbol $\varsigma$ that satisfies the assumptions, then replacing any occurrence of $\varsigma$ by $v$ yields an equivalent symbolic state. For another example, if a symbol is not mentioned by the assumptions, the heap chunks or the local variable bindings, then removing it from the set of used symbols yields an equivalent symbolic state.
@@ -6193,13 +6195,63 @@ int main() //@ : main
 
 \subsection{Exercise \ref{exercise:characters}: characters.c}\label{solution:characters}
 
-The solution is given in the text of Section~\ref{section:arrays}.
+\begin{lstlisting}
+char getchar(); /*@ requires true; @*/ /*@ ensures true; @*/
+void putchar(char c); /*@ requires true; @*/ /*@ ensures true; @*/
+
+/*@
+predicate characters(char *start, int count) =
+    count <= 0 ? true : character(start, _) &*& characters(start + 1, count - 1);
+@*/
+
+char *malloc(int count);
+    //@ requires true;
+    //@ ensures characters(result, count);
+
+void getchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    if (count > 0) {
+        //@ open characters(start, count);
+        char c = getchar();
+        *start = c;
+        getchars(start + 1, count - 1);
+        //@ close characters(start, count);
+    }
+}
+
+void putchars(char *start, int count)
+    //@ requires characters(start, count);
+    //@ ensures characters(start, count);
+{
+    if (count > 0) {
+        //@ open characters(start, count);
+        char c = *start;
+        putchar(c);
+        putchars(start + 1, count - 1);
+        //@ close characters(start, count);
+    }
+}
+
+int main()
+    //@ requires true;
+    //@ ensures true;
+{
+    char *array = malloc(100);
+    getchars(array, 100);
+    putchars(array, 100);
+    putchars(array, 100);
+    //@ leak characters(array, 100);
+    return 0;
+}
+\end{lstlisting}
 
 \subsection{Exercise \ref{exercise:xor}: xor.c}\label{solution:xor}
 
 \begin{lstlisting}
-char getchar(); /*@ requires true; *@/ /*@ ensures true; @*/
-void putchar(char c); /*@ requires true; *@/ /*@ ensures true; @*/
+char getchar(); /*@ requires true; @*/ /*@ ensures true; @*/
+void putchar(char c); /*@ requires true; @*/ /*@ ensures true; @*/
 
 /*@
 predicate characters(char *start, int count) =
@@ -6266,8 +6318,8 @@ int main() /*@ requires true; @*/ /*@ ensures true; @*/
 \subsection{Exercise \ref{exercise:characters_loop}: characters\_loop.c}\label{solution:characters_loop}
 
 \begin{lstlisting}
-char getchar(); /*@ requires true; *@/ /*@ ensures true; @*/
-void putchar(char c); /*@ requires true; *@/ /*@ ensures true; @*/
+char getchar(); /*@ requires true; @*/ /*@ ensures true; @*/
+void putchar(char c); /*@ requires true; @*/ /*@ ensures true; @*/
 
 /*@
 predicate characters(char *start, int count) =

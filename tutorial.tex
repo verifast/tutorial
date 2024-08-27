@@ -1756,7 +1756,7 @@ the first argument is the address of the variable, and the
 second argument is the current value of the variable.
 
 It follows that the following is a valid contract for function
-\lstinline!nodes_filter!:
+\lstinline!nodes_filter!:\footnote{This sentence is \emph{almost} true. This is a valid contract for function \lstinline!nodes_filter! only if C's \emph{effective types} rules are disabled, by specifying \lstinline|-fno-strict-aliasing| on the C compiler's and VeriFast's command line, or by checking \emph{Assume untyped memory} in the VeriFast IDE's Verify menu. To verify compliance with C's effective types rules when accessing the variable pointed to by \lstinline|n| as a variable of type \lstinline|struct node *|, VeriFast checks that that is that variable's \emph{effective type}, expressed in VeriFast syntax as \lstinline|has_type(node, &typeid(struct node *)) == true|. You can ignore this complexity by using the points-to syntax \lstinline!*n |-> ?node!, which implies both the \lstinline|pointer| chunk and the \lstinline|has_type| fact.}
 \begin{lstlisting}
 void nodes_filter(struct node **n, int_predicate *p)
     //@ requires pointer(n, ?node) &*& nodes(node, _) &*& is_int_predicate(p) == true;
@@ -4254,7 +4254,7 @@ int main() {
     printf("How many students do you have? ");
     int n = read_int();
     if (n < 0 || 0x20000000 <= n) abort();
-    char **names = malloc(n * sizeof(char **));
+    char **names = malloc(n * sizeof(char *));
     if (names == 0) abort();
     for (int i = 0; i != n; i++) {
         printf("Please enter the name of student number %d: ", i + 1);
